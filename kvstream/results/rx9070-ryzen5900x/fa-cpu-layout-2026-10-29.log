@@ -1,0 +1,34 @@
+17664 rows per layer, 16 layers, 615.0 MB of K/V per pass
+memory                             layout      calls threads    ms/pass     GB/s
+malloc                             interleaved    16       8      56.53    10.88
+malloc                             interleaved    16      12      40.75    15.09
+malloc                             interleaved    16      16      47.60    12.92
+malloc                             interleaved    16      24      65.11     9.45
+malloc                             interleaved     1       8      59.52    10.33
+malloc                             interleaved     1      12      47.46    12.96
+malloc                             interleaved     1      16      50.63    12.15
+malloc                             interleaved     1      24      60.35    10.19
+malloc                             per-head       16       8      38.69    15.89
+malloc                             per-head       16      12      26.70    23.03
+malloc                             per-head       16      16      32.57    18.88
+malloc                             per-head       16      24      33.52    18.35
+malloc                             per-head        1       8      37.96    16.20
+malloc                             per-head        1      12      32.91    18.69
+malloc                             per-head        1      16      30.68    20.04
+malloc                             per-head        1      24      31.36    19.61
+pinned (ROCm_Host)                 interleaved    16       8      55.43    11.09
+pinned (ROCm_Host)                 interleaved    16      12      39.84    15.44
+pinned (ROCm_Host)                 interleaved    16      16      48.85    12.59
+pinned (ROCm_Host)                 interleaved    16      24      51.57    11.93
+pinned (ROCm_Host)                 interleaved     1       8      55.92    11.00
+pinned (ROCm_Host)                 interleaved     1      12      47.90    12.84
+pinned (ROCm_Host)                 interleaved     1      16      48.20    12.76
+pinned (ROCm_Host)                 interleaved     1      24      46.81    13.14
+pinned (ROCm_Host)                 per-head       16       8      38.16    16.12
+pinned (ROCm_Host)                 per-head       16      12      35.17    17.48
+pinned (ROCm_Host)                 per-head       16      16      39.34    15.63
+pinned (ROCm_Host)                 per-head       16      24      86.65     7.10
+pinned (ROCm_Host)                 per-head        1       8      36.87    16.68
+pinned (ROCm_Host)                 per-head        1      12      30.64    20.07
+pinned (ROCm_Host)                 per-head        1      16      30.40    20.23
+pinned (ROCm_Host)                 per-head        1      24      36.96    16.64
