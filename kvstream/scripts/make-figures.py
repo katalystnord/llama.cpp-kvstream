@@ -63,7 +63,7 @@ def context(t, theme):
     xs, ys = line('stream', t['s1'], 'o')
     for x, y in zip(xs, ys):
         ax.annotate(f'{y:.1f}', (x, y), textcoords='offset points', xytext=(7, 5), color=t['text'], fontsize=8.5)
-    ax.text(70, 58, d['stream']['label'], color=t['text2'], fontsize=9, va='top')
+    ax.text(140, 47, d['stream']['label'], color=t['text2'], fontsize=9, va='top')
     xs, ys = line('plain', t['s2'], 's')
     for (x, y), off in zip(zip(xs, ys), [(7, 4), (-4, -15), (6, 4)]):
         ax.annotate(f'{y:.1f}', (x, y), textcoords='offset points', xytext=off, color=t['text'], fontsize=8.5)
