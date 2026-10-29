@@ -118,6 +118,27 @@ each row (the grouped path's work items are (KV head, chunk), so each reads a qu
 as 16 small passes per token (17,664 rows per layer at 0.2) with the pool woken for each. The waits for Q (22 to 27 ms
 per token) are the GPU's other layers, when the CPU has nothing to do.
 
+## After the first measurements (2026-10-29 afternoon)
+
+Steps, each its own commit on `split-attention` with logs in `results/rx9070-ryzen5900x/`:
+
+| step | CPU alone, 1 / 5 query tokens (fa-cpu-layout) | Saluki 150K, no drafting | Qwen3.8 125K, MTP |
+|---|---|---|---|
+| first split | 15 / 4.5 GB/s | 10.1 t/s (0.2 : 12) | |
+| whole rows per work item | 19.6 / 4.5 | 11.4 (0.3 : 16) | fixed 0.2: 15.9 (none 33.8) |
+| blocked kernel (16 rows) | 25 / 7.3 | 11.5 (0.3) | fixed 0.1: 31.7 |
+| batched q8_0 scores, vector exp | 27 to 36 / 8.3 to 9.9 | 11.7 (0.4), 11.3 (0.3) | fixed 0.2: 19.6, 0.3: 23.1 (none 32.6) |
+
+- Auto (time per token kept, steps of 0.1, start at no split): settles at 0.3 for Saluki (106 -> 83 ms per token) and
+  stays at no split with MTP (33.6 t/s against 32.6 to 34.0 without). 0.05 steps got stuck at 0, since a small share
+  does not cover the split's fixed cost per ubatch.
+- No regression where nothing streams: at 30K (cache in the pool) auto never splits (33.8 against 33.7 to 33.9).
+- Ceiling (LLAMA_KV_SPLIT_NOOP, the CPU part skipped, output wrong): MTP at 125K 39.4 t/s at 0.3, 40.2 at 0.5
+  against 33.7, with fewer drafts accepted, so roughly 1.3 to 1.4x per verify pass; Saluki 12.6 at 0.3, 16.3 at 0.5.
+- So without drafting the split gains about 30%, close to what the shared DDR4 allows (about 42 GB/s of both routes
+  against about 51 GB/s peak). With drafting the CPU part, 30 query vectors per KV head, is bound by arithmetic and
+  would need 2 to 3x more in the server; not pursued further for now.
+
 ## Prior art (survey 2026-10-28, `~/code/scratch/llm-perf-investigation/research-kv-offload-2026-10-28.md`)
 
 Closest: HGCA (arXiv 2507.03153: GPU dense over recent KV, CPU sparse over the rest, LSE merge; no code found),
