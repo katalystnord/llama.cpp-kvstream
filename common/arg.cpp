@@ -2797,7 +2797,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
     add_opt(common_arg(
         {"--kv-stream"},
         "[EXPERIMENTAL] keep the KV cache in host memory and only --kv-resident-mib of it on the GPU (requires -fa on, "
-        "a q8_0 K cache and a q4_0 V cache)",
+        "a q8_0 K cache and a q4_0 or q8_0 V cache)",
         [](common_params & params) {
             params.kv_stream = true;
         }

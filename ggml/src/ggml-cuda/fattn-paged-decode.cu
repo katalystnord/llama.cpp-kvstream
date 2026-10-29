@@ -36,7 +36,7 @@ static bool pd_shapes_ok(int device, const ggml_tensor * dst, int64_t max_nb) {
     float params[3];
     memcpy(params, dst->op_params, sizeof(params)); // scale, max_bias, logit_softcap
     if (!GGML_CUDA_CC_IS_RDNA4(ggml_cuda_info().devices[device].cc)) return false;
-    if (Q->type != GGML_TYPE_F32 || K->type != GGML_TYPE_Q8_0 || V->type != GGML_TYPE_Q4_0) return false;
+    if (Q->type != GGML_TYPE_F32 || K->type != GGML_TYPE_Q8_0 || (V->type != GGML_TYPE_Q4_0 && V->type != GGML_TYPE_Q8_0)) return false;
     if (Q->ne[0] != PD_D || K->ne[0] != PD_D || V->ne[0] != PD_D) return false;
     if (Q->ne[1] < 1 || Q->ne[1] > max_nb || Q->ne[3] != 1 || K->ne[3] != 1 || V->ne[3] != 1) return false;
     if (K->ne[2] < 1 || Q->ne[2] != PD_GQA * K->ne[2] || V->ne[2] != K->ne[2] || V->ne[1] != K->ne[1]) return false;
@@ -184,10 +184,11 @@ struct pd_prefill_scratch {
         const pd_full_mask full(dst);
         pd_part part(&full.fa, nullptr, nullptr, 0, 0, n_tok, nullptr, nullptr);
         dst_size  = GGML_PAD(ggml_nbytes(dst), 256);
-        mask_size = dst->src[3] && !pp_enabled() ? GGML_PAD(n_tok*dst->src[3]->ne[1]*sizeof(half), 256) : 0;
+        const bool pp = pp_enabled() && dst->src[2]->type == GGML_TYPE_Q4_0;
+        mask_size = dst->src[3] && !pp ? GGML_PAD(n_tok*dst->src[3]->ne[1]*sizeof(half), 256) : 0;
         // pp_attn_q reads the quantized K/V and needs only the part's output; the f16 copies inside a part are aligned
         // to 128 B from the start of the buffer
-        part_size = pp_enabled()
+        part_size = pp
             ? dst_size
             : GGML_PAD(ggml_cuda_flash_attn_ext_get_alloc_size(device, &part.dst) + 256, 256) + mask_size;
         lse_size  = GGML_PAD(dst->src[0]->ne[1]*dst->src[0]->ne[2]*sizeof(float), 256);
@@ -266,9 +267,13 @@ void ggml_cuda_flash_attn_ext_paged_decode(ggml_backend_cuda_context & ctx, ggml
     // the kernel indexes mask rows by K/V column
     const char * mask_data = mask ? (const char *) mask->data - (ptrdiff_t) mask_col0*sizeof(half) : nullptr;
     const int64_t mask_nb1 = mask ? mask->nb[1] : 0;
-#define PD_LAUNCH(M, P, MT) \
-    pd_partial<M, P, MT><<<grid, PD_NWARPS * 32, 0, stream>>>((const char *) Q->data, Q->nb[1], Q->nb[2], kv_k, kv_v, sync, \
-        mask_data, mask_nb1, mask_col0, scale, n_kv, nb, n_chunks, chunks_per_split, O_part, ML_part)
+    const bool vq8 = V->type == GGML_TYPE_Q8_0; // Q8_0 V variant (beast); Q4_0 V otherwise
+#define PD_ARGS (const char *) Q->data, Q->nb[1], Q->nb[2], kv_k, kv_v, sync, \
+        mask_data, mask_nb1, mask_col0, scale, n_kv, nb, n_chunks, chunks_per_split, O_part, ML_part
+#define PD_LAUNCH(M, P, MT) do { \
+    if (vq8) { pd_partial<M, P, MT, true ><<<grid, PD_NWARPS * 32, 0, stream>>>(PD_ARGS); } \
+    else     { pd_partial<M, P, MT, false><<<grid, PD_NWARPS * 32, 0, stream>>>(PD_ARGS); } \
+} while (0)
     if (n_tiles > 1) {
         // a 32-row tile spans at most 7 query tokens
         if (pages) { PD_LAUNCH(2, true, 8); } else { PD_LAUNCH(2, false, 8); }
@@ -281,6 +286,7 @@ void ggml_cuda_flash_attn_ext_paged_decode(ggml_backend_cuda_context & ctx, ggml
         if (pages) { PD_LAUNCH(2, true, 8); } else { PD_LAUNCH(2, false, 8); }
     }
 #undef PD_LAUNCH
+#undef PD_ARGS
     CUDA_CHECK(cudaGetLastError());
     pd_combine<<<dim3(nb * PD_GQA, n_heads), PD_D, 0, stream>>>(O_part, ML_part, n_splits, n_tiles * R,
         (char *) dst->data, dst->nb[1], dst->nb[2], sync);
@@ -335,7 +341,8 @@ void ggml_cuda_flash_attn_ext_paged_prefill(ggml_backend_cuda_context & ctx, ggm
     bool first = true;
     auto attend = [&](const char * k_base, const char * v_base, int64_t row0, int64_t col0, int64_t n_tok) {
         pd_part part(dst, k_base, v_base, row0, col0, n_tok, (float *) part_out, part_lse);
-        if (pp_enabled()) {
+        // pp_attn_q reads q4_0 V only; a q8_0 V cache takes the stock kernels for its parts
+        if (pp_enabled() && dst->src[2]->type == GGML_TYPE_Q4_0) {
             float scale;
             memcpy(&scale, dst->op_params, sizeof(float));
             const int64_t n_q = Q->ne[1];

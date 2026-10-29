@@ -10732,41 +10732,44 @@ static const ggml_type other_types[] = {
 static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
     std::vector<std::unique_ptr<test_case>> test_cases;
 
-    // Decode shapes of the RDNA4 Q8_0/Q4_0 paged decode kernel (4 KV heads x GQA 6, head 256, 1-8 query tokens).
-    for (int kv : { 256, 1000, 8192, 32768, }) {
-        for (int nb : { 1, 2, 3, 4, 5, 6, 8, }) {
-            test_cases.emplace_back(new test_flash_attn_ext(256, 256, 4, {6, 1}, kv, nb, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_Q8_0, GGML_TYPE_Q4_0));
-        }
-    }
-    // larger batches (n-gram drafts, short prompts, prefill): the decode kernel's row tiles for paged K/V up to 96 query
-    // tokens, the chunked paged prefill above
-    for (int kv : { 1024, 8192, }) {
-        for (int nb : { 7, 9, 17, 33, 65, 96, 97, 512, }) {
-            test_cases.emplace_back(new test_flash_attn_ext(256, 256, 4, {6, 1}, kv, nb, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_Q8_0, GGML_TYPE_Q4_0));
-            test_cases.emplace_back(new test_flash_attn_ext_paged(256, 4, 6, kv, nb, GGML_TYPE_Q8_0, GGML_TYPE_Q4_0, 3));
-        }
-    }
-    // narrow masks (the last mask_cols columns; llama's compact causal mask): paged and contiguous K/V, decode, row-tile
-    // and prefill shapes, aligned and unaligned widths, the start column at a chunked prefill part boundary (6144)
-    for (int kv : { 1024, 8192, 32768, }) {
-        for (int nb : { 1, 4, 8, 17, 96, 97, 512, }) {
-            if (kv == 32768 && nb > 96) {
-                continue;
+    // The paged decode kernel's cases run for Q4_0 V (the fork's original) and Q8_0 V (beast, 2026-10-28).
+    for (ggml_type type_V : { GGML_TYPE_Q4_0, GGML_TYPE_Q8_0, }) {
+        // Decode shapes of the RDNA4 Q8_0/Q4_0 paged decode kernel (4 KV heads x GQA 6, head 256, 1-8 query tokens).
+        for (int kv : { 256, 1000, 8192, 32768, }) {
+            for (int nb : { 1, 2, 3, 4, 5, 6, 8, }) {
+                test_cases.emplace_back(new test_flash_attn_ext(256, 256, 4, {6, 1}, kv, nb, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_Q8_0, type_V));
             }
-            for (int64_t cols : { (int64_t) GGML_PAD(nb + 255, 256), (int64_t) 300, }) {
-                for (bool paged : { true, false, }) {
-                    test_cases.emplace_back(new test_flash_attn_ext_paged(256, 4, 6, kv, nb, GGML_TYPE_Q8_0, GGML_TYPE_Q4_0, paged ? 3 : 0, true, cols, paged));
+        }
+        // larger batches (n-gram drafts, short prompts, prefill): the decode kernel's row tiles for paged K/V up to 96 query
+        // tokens, the chunked paged prefill above
+        for (int kv : { 1024, 8192, }) {
+            for (int nb : { 7, 9, 17, 33, 65, 96, 97, 512, }) {
+                test_cases.emplace_back(new test_flash_attn_ext(256, 256, 4, {6, 1}, kv, nb, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_Q8_0, type_V));
+                test_cases.emplace_back(new test_flash_attn_ext_paged(256, 4, 6, kv, nb, GGML_TYPE_Q8_0, type_V, 3));
+            }
+        }
+        // narrow masks (the last mask_cols columns; llama's compact causal mask): paged and contiguous K/V, decode, row-tile
+        // and prefill shapes, aligned and unaligned widths, the start column at a chunked prefill part boundary (6144)
+        for (int kv : { 1024, 8192, 32768, }) {
+            for (int nb : { 1, 4, 8, 17, 96, 97, 512, }) {
+                if (kv == 32768 && nb > 96) {
+                    continue;
+                }
+                for (int64_t cols : { (int64_t) GGML_PAD(nb + 255, 256), (int64_t) 300, }) {
+                    for (bool paged : { true, false, }) {
+                        test_cases.emplace_back(new test_flash_attn_ext_paged(256, 4, 6, kv, nb, GGML_TYPE_Q8_0, type_V, paged ? 3 : 0, true, cols, paged));
+                    }
                 }
             }
         }
-    }
-    for (bool paged : { true, false, }) {
-        test_cases.emplace_back(new test_flash_attn_ext_paged(256, 4, 6, 8192, 512, GGML_TYPE_Q8_0, GGML_TYPE_Q4_0, paged ? 3 : 0, true, 2048, paged));
-    }
-    for (int kv : { 256, 1024, 8192, 32768, }) {
-        for (int nb : { 1, 2, 3, 4, 5, 6, 8, }) {
-            for (int ring_every : { 0, 1, 3, }) {
-                test_cases.emplace_back(new test_flash_attn_ext_paged(256, 4, 6, kv, nb, GGML_TYPE_Q8_0, GGML_TYPE_Q4_0, ring_every));
+        for (bool paged : { true, false, }) {
+            test_cases.emplace_back(new test_flash_attn_ext_paged(256, 4, 6, 8192, 512, GGML_TYPE_Q8_0, type_V, paged ? 3 : 0, true, 2048, paged));
+        }
+        for (int kv : { 256, 1024, 8192, 32768, }) {
+            for (int nb : { 1, 2, 3, 4, 5, 6, 8, }) {
+                for (int ring_every : { 0, 1, 3, }) {
+                    test_cases.emplace_back(new test_flash_attn_ext_paged(256, 4, 6, kv, nb, GGML_TYPE_Q8_0, type_V, ring_every));
+                }
             }
         }
     }
