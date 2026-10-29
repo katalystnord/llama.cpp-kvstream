@@ -1,0 +1,7 @@
+#!/bin/sh
+# Free the GPU for one llama.cpp server (2026-10-28): pause the 8080 router socket unless told to keep it, and unload
+# any Ollama model. Used by llama-long.service; Pi's model guard calls it too. The 16 GB card holds one model at a time.
+[ "$1" = keep-socket ] || systemctl --user --no-block stop llama-proxy.socket
+export OLLAMA_HOST=${OLLAMA_HOST:-127.0.0.1:11434}
+for m in $(ollama ps 2>/dev/null | awk 'NR>1 {print $1}'); do ollama stop "$m"; done
+exit 0

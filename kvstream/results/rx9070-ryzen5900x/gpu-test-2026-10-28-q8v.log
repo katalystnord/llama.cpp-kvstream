@@ -1,0 +1,16 @@
+[2026-10-28 15:58:20] base48k up after 6 s: VRAM 15663 MiB, server RSS 1086620 KiB
+{"label": "base48k@40000", "prompt_tokens": 40069, "wall_s": 70.7, "prefill_tps": 614.7, "decode_tps": 38.9, "draft": "136/300", "needle_found": true, "answer_start": "**Question 1:**\nMARMALADE-7\n\n**Question 2:**\n`llama-context.cpp` implements the `llama_context` class, which serves as the primary runtime interface for executing LLM inference. It manages the lifecycle of the inference engine, including initializing backend devices (CPU, GPU, or accelerator), confi"}
+[2026-10-28 15:59:30] after 40000: VRAM 15739 MiB
+[2026-10-28 15:59:42] stream128k: server exited, see server-stream128k.log
+0.03.214.967 E cmn  common_init_: failed to create context with model '~/models/ollama/blobs/sha256-d847e2c1e4aa276e4b7b8e9ad7628050e61e165d49ab995407bc36677a6f3864'
+0.03.214.971 E cmn  common_init_: failed to create context with model '~/models/ollama/blobs/sha256-d847e2c1e4aa276e4b7b8e9ad7628050e61e165d49ab995407bc36677a6f3864'
+0.03.214.974 E srv    load_model: failed to create_context with model '~/models/ollama/blobs/sha256-d847e2c1e4aa276e4b7b8e9ad7628050e61e165d49ab995407bc36677a6f3864'
+0.03.214.975 I srv    operator(): operator(): cleaning up before exit...
+0.03.215.495 E srv  llama_server: exiting due to model loading error
+[2026-10-28 15:59:48] stream200k: server exited, see server-stream200k.log
+0.03.212.464 E cmn  common_init_: failed to create context with model '~/models/ollama/blobs/sha256-d847e2c1e4aa276e4b7b8e9ad7628050e61e165d49ab995407bc36677a6f3864'
+0.03.212.467 E cmn  common_init_: failed to create context with model '~/models/ollama/blobs/sha256-d847e2c1e4aa276e4b7b8e9ad7628050e61e165d49ab995407bc36677a6f3864'
+0.03.212.471 E srv    load_model: failed to create_context with model '~/models/ollama/blobs/sha256-d847e2c1e4aa276e4b7b8e9ad7628050e61e165d49ab995407bc36677a6f3864'
+0.03.212.473 I srv    operator(): operator(): cleaning up before exit...
+0.03.212.976 E srv  llama_server: exiting due to model loading error
+[2026-10-28 15:59:48] RUN DONE

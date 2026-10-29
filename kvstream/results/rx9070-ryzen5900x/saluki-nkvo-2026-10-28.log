@@ -1,0 +1,6 @@
+[2026-10-28 19:13:48] no-kv-offload up after 31 s: VRAM 8960 MiB, server RSS 5385724 KiB
+{"label": "nkvo@64000", "prompt_tokens": 64069, "wall_s": 343.6, "prefill_tps": 200.8, "decode_tps": 6.4, "draft": "None/None", "needle_found": true, "answer_start": "Question 1: MARMALADE-7\n\nQuestion 2: The file `llama-context.cpp` implements the `llama_context` class, which manages the runtime state for a loaded Llama model. It handles context parameter initialization (context size, batch sizes, attention types, and memory settings), backend and scheduler setup"}
+[2026-10-28 19:19:31] after 64000: VRAM 9230 MiB
+{"label": "nkvo@125000", "prompt_tokens": 125068, "wall_s": 746.2, "prefill_tps": 175.6, "decode_tps": 5.4, "draft": "41/44", "needle_found": true, "answer_start": "Question 1: MARMALADE-7\n\nQuestion 2: The file `llama-context.cpp` implements the `llama_context` class, which manages the runtime state for a loaded Llama model. It handles context parameter initialization (context size, batch sizes, RoPE scaling, and attention types), backend setup (GPU/CPU/ACCEL),"}
+[2026-10-28 19:31:58] after 125000: VRAM 9257 MiB
+[2026-10-28 19:31:58] RUN DONE

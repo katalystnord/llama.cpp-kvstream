@@ -1,0 +1,12 @@
+[2026-10-28 16:43:26] server up (first) after 9 s, VRAM 14641 MiB
+{"document_tokens": 125023}
+{"step": "read document", "wall_s": 212.0, "read_tps": 589.9}
+{"step": "save", "wall_s": 25.5, "server": {"id_slot": 0, "filename": "doc-125000.bin", "n_saved": 125023, "n_written": 4231202748, "timings": {"save_ms": 25410.963}}}
+{"step": "question 1 (same server)", "wall_s": 4.8, "tokens_read": 27, "read_ms": 2662, "write_tps": 46.6, "needle_found": false, "answer": "`llama-context.cpp` implements the `llama_context` class, which manages the runtime state for LLM inference. It handles backend initialization, memory allocation, and graph scheduling for both prompt processing and token generation. The fil"}
+total 4132036
+-rw-rw-r-- 1 david david 4231202748 Oct 28 16:47 doc-125000.bin
+[2026-10-28 16:47:44] server up (second) after 9 s, VRAM 14685 MiB
+{"document_tokens": 125023}
+{"step": "restore", "wall_s": 2.7, "server": {"id_slot": 0, "filename": "doc-125000.bin", "n_restored": 125023, "n_read": 4231202748, "timings": {"restore_ms": 2705.326}}}
+{"step": "question 2 (fresh server, restored)", "wall_s": 1.9, "tokens_read": 34, "read_ms": 853, "write_tps": 56.9, "needle_found": true, "answer": "The code word for the beast test is **MARMALADE-7**.\n\nThree files from the text are:\n1. `src/llama-context.cpp`\n2. `common/arg.cpp`\n3. `common/chat-auto-parser-generator.cpp`"}
+[2026-10-28 16:47:50] RUN DONE

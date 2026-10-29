@@ -1,0 +1,11 @@
+[2026-10-28 20:23:25] server up: VRAM 9817 MiB
+{"label": "fill@150000", "prompt_tokens": 150070, "wall_s": 404.2, "prefill_tps": 388.7, "decode_tps": 9.0, "draft": "None/None", "needle_found": true, "answer_start": "Question 1: MARMALADE-7\n\nQuestion 2: The file `llama-context.cpp` implements the `llama_context` class, which manages the runtime state for a loaded Llama model. It handles context parameter initialization (context size, batch sizes, RoPE scaling, and attention types), backend setup (GPU/CPU/ACCEL),"}
+[2026-10-28 20:30:10] CPU attention alone (us per layer pass, 256K q8_0):
+50122.90 us/run
+[2026-10-28 20:30:18] stream alone:
+{"label": "alone@150000", "prompt_tokens": 150070, "wall_s": 6.4, "prefill_tps": 23.3, "decode_tps": 26.3, "draft": "115/116", "needle_found": true, "answer_start": "Question 1: MARMALADE-7\n\nQuestion 2: The file `llama-context.cpp` implements the `llama_context` class, which manages the runtime state for a loaded Llama model. It handles context parameter initialization (context size, batch sizes, RoPE scaling, and attention types), backend setup (GPU/CPU/ACCEL),"}
+[2026-10-28 20:30:24] both at once:
+{"label": "both@150000", "prompt_tokens": 150070, "wall_s": 6.6, "prefill_tps": 23.1, "decode_tps": 25.6, "draft": "115/116", "needle_found": true, "answer_start": "Question 1: MARMALADE-7\n\nQuestion 2: The file `llama-context.cpp` implements the `llama_context` class, which manages the runtime state for a loaded Llama model. It handles context parameter initialization (context size, batch sizes, RoPE scaling, and attention types), backend setup (GPU/CPU/ACCEL),"}
+[2026-10-28 20:30:32] CPU attention during the stream (us per layer pass, one line per benchmark run):
+50303.95 us/run
+[2026-10-28 20:30:32] RUN DONE

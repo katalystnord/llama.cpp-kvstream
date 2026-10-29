@@ -1,0 +1,51 @@
+[2026-10-28 18:20:10] pool 5400 MiB, up after 8 s: VRAM 10510 MiB, server RSS 5406640 KiB
+{"label": "saluki@125000", "prompt_tokens": 125068, "wall_s": 300.9, "prefill_tps": 423.9, "decode_tps": 30.2, "draft": "None/None", "needle_found": true, "answer_start": "Question 1: MARMALADE-7\n\nQuestion 2: The file `llama-context.cpp` implements the `llama_context` class, which manages the runtime state for a loaded Llama model. It handles context parameter initialization (context size, batch sizes, RoPE scaling, and attention types), backend setup (GPU/CPU/ACCEL),"}
+[2026-10-28 18:25:11] after 125000: VRAM 14210 MiB
+image answer (29.4 s, timings {'prompt_per_second': 326.2, 'predicted_per_second': 38.3}):
+This appears to be a **research article page** from an academic journal.
+
+**Title of the page:**  
+It does not have a single unified title across the entire page, but the main section heading visible is:  
+**“3. Experimental Results and Discussions”**
+
+Additionally, there is a subsection:  
+**“3.1 The effect of fiber length on mechanical properties of BFGC”**
+
+---
+
+**Table present:**  
+**Table 1 — Properties of biodegradable resin used as matrix.**
+
+**Column headings in Table 1:**
+
+| Column Heading         |
+|------------------------|
+| Density (g/cm³)        |
+| Water absorption (%)   |
+| Tensile strength (MPa) |
+| Tensile elongation (%) |
+| Young’s modulus (MPa)  |
+| Flexural strength (MPa)|
+| Flexural modulus (MPa) |
+
+---
+
+**Additional elements on the page:**
+
+- **Figures:**
+  - **Fig. 1**: Photomicrographs of untreated and alkali-treated bamboo fiber.
+  - **Fig. 2**: Relationship between tensile strength of BFGC and fiber length.
+  - **Fig. 3**: Relationship between flexural strength of BFGC and fiber length.
+
+- **Journal footer:**  
+  *Series A, Vol. 47, No. 4, 2004* — *JSME International Journal*
+
+---
+
+In summary:  
+✅ **Page Type:** Research article page  
+✅ **Main Title/Section:** “3. Experimental Results and Discussions” (with subsection 3.1)  
+✅ **Table Title:** Table 1 – Properties of biodegradable resin used as matrix  
+✅ **Table Column Headings:** As listed above.
+[2026-10-28 18:25:41] after image: VRAM 14649 MiB
+[2026-10-28 18:25:42] RUN DONE

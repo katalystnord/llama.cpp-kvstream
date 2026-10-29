@@ -1,0 +1,64 @@
+{
+  "_comment": "Models for the Pi context lever (/ctx) and the kv-stream long server (llama-long.service). The lever reads each GGUF header for its shape and KV cost; speed = [context tokens, write t/s, read t/s] measured near a full window with q8 V at 220 W. Empty template or spec = serve-long.sh defaults (Qwen3.8 template; MTP + n-gram drafting).",
+  "models": [
+    {
+      "id": "qwen38",
+      "name": "Qwen3.8 27B",
+      "gguf": "~/models/Qwen3.8-27B-IQ3_S.gguf",
+      "note": "coding, MTP drafting",
+      "speed": [
+        [
+          49152,
+          60,
+          640
+        ],
+        [
+          65536,
+          52.5,
+          577
+        ],
+        [
+          131072,
+          34,
+          464
+        ],
+        [
+          204800,
+          16.4,
+          379
+        ]
+      ]
+    },
+    {
+      "id": "saluki",
+      "name": "Saluki 27B",
+      "gguf": "~/models/gguf/underdog-saluki-27b/Underdog-Saluki-27B-1.0-IQ2-mix.gguf",
+      "mmproj": "~/models/gguf/underdog-saluki-27b/mmproj-Underdog-Saluki-27B-1.0-Q8_0.gguf",
+      "spec": "--spec-type ngram-mod --spec-ngram-mod-n-min 12 --spec-ngram-mod-n-max 32 --spec-ngram-mod-n-match 24",
+      "input": [
+        "text",
+        "image"
+      ],
+      "note": "papers and figures",
+      "poolMib": 5400,
+      "speed": [
+        [
+          65536,
+          33.8,
+          497
+        ],
+        [
+          125068,
+          30.2,
+          424
+        ],
+        [
+          175069,
+          25.9,
+          367
+        ]
+      ],
+      "_measured": "2026-10-28, 220 W, q8 V, pool 5400 MiB: 125K and 175K (VRAM peak 15.2 GB of 16.3); the 64K point is from the 2420 MiB pool run, a lower bound. With the 2420 MiB pool, 250K read at 311 t/s and wrote at 3.9 t/s. One 250K run with pool 5400 stopped at 166K on a copy stall (intermittent, open). Results: kvstream/results/rx9070-ryzen5900x/saluki-stream-*.log"
+    }
+  ]
+}

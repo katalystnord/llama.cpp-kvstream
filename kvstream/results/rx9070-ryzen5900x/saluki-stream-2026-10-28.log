@@ -1,0 +1,22 @@
+[2026-10-28 18:11:48] up after 12 s: VRAM 10585 MiB, server RSS 5405872 KiB
+{"label": "saluki@64000", "prompt_tokens": 64069, "wall_s": 133.8, "prefill_tps": 496.9, "decode_tps": 33.8, "draft": "None/None", "needle_found": true, "answer_start": "Question 1: MARMALADE-7\n\nQuestion 2: The file `llama-context.cpp` implements the `llama_context` class, which manages the runtime state for a loaded Llama model. It handles context parameter initialization (context size, threads, attention types), memory allocation for KV caches and compute buffers,"}
+[2026-10-28 18:14:02] after 64000: VRAM 12179 MiB
+{"label": "saluki@125000", "prompt_tokens": 125068, "wall_s": 309.9, "prefill_tps": 422.8, "decode_tps": 16.2, "draft": "38/55", "needle_found": true, "answer_start": "Question 1: MARMALADE-7\n\nQuestion 2: The file `llama-context.cpp` implements the `llama_context` class, which manages the runtime state for a loaded Llama model. It handles context parameter initialization (context size, batch sizes, RoPE scaling, and attention types), backend setup (GPU/CPU/ACCEL),"}
+[2026-10-28 18:19:12] after 125000: VRAM 12162 MiB
+image answer (23.3 s, timings {'prompt_per_second': 326.2, 'predicted_per_second': 37.8}):
+This is a **scientific journal article page**.
+
+**Title:** *JSME International Journal* (Specific page title is implied by the article context: "Experimental Results and Discussions")
+
+**Table Column Headings:**
+- **Density (g/cm³)**
+- **Water absorption (%)**
+- **Tensile strength (MPa)**
+- **Tensile elongation (%)**
+- **Young's modulus (MPa)**
+- **Flexural strength (MPa)**
+- **Flexural modulus (MPa)**
+
+*(Note: The table itself does not have a single unified column heading, but each row represents a property with a corresponding value. The "Table 1" caption identifies it as "Properties of biodegradable resin used as matrix.")*
+[2026-10-28 18:19:36] after image: VRAM 12618 MiB
+[2026-10-28 18:19:37] RUN DONE

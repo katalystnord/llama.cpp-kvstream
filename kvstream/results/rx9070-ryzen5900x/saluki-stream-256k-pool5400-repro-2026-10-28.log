@@ -1,0 +1,41 @@
+[2026-10-28 18:53:40] pool 5400 MiB, up after 18 s: VRAM 11138 MiB, server RSS 9732172 KiB
+{"label": "saluki@175000", "prompt_tokens": 175069, "wall_s": 484.5, "prefill_tps": 367.0, "decode_tps": 25.9, "draft": "None/None", "needle_found": true, "answer_start": "Question 1: MARMALADE-7\n\nQuestion 2: The file `llama-context.cpp` implements the `llama_context` class, which manages the runtime state for a loaded Llama model. It handles context parameter initialization (context size, batch sizes, RoPE scaling, and attention types), backend setup (CPU/GPU initial"}
+[2026-10-28 19:01:45] after 175000: VRAM 15153 MiB
+image answer (36.1 s, timings {'prompt_per_second': 283.8, 'predicted_per_second': 38.2}):
+This is a **scientific journal article** page.
+
+**Title of the article:**  
+**Bamboo Fiber Reinforced Green Composites: Effect of Fiber Length on Mechanical Properties**
+
+*(Note: The exact title is not fully visible on this page, but the content strongly suggests this. A more precise title based on the visible text would be:)*
+
+**"Effect of Fiber Length on Mechanical Properties of Bamboo Fiber Reinforced Green Composites (BFGC)"**
+
+---
+
+**Table 1: Properties of biodegradable resin used as matrix.**
+
+**Column Headings:**
+
+| **Property**              | **Value**   |
+|---------------------------|-------------|
+| Density (g/cm³)           | 1.18        |
+| Water absorption (%)      | 2.0         |
+| Tensile strength (MPa)    | 12.2        |
+| Tensile elongation (%)    | 550         |
+| Young's modulus (MPa)     | 431         |
+| Flexural strength (MPa)   | 13.3        |
+| Flexural modulus (MPa)    | 460         |
+
+*(Note: The table in the image only shows two columns — the property name and its value. There is no third column like "Units" because the units are included in the property name.)*
+
+---
+
+**Other Key Information on This Page:**
+
+- **Section 2.2:** Mechanical testing and observation
+- **Section 3:** Experimental Results and Discussions
+- **Section 3.1:** The effect of fiber length on mechanical properties of BFGC
+- **Figures 1, 2, and 3** are shown with captions describing photomicrographs and plots of tensile/flexural strength vs. fiber length.
+[2026-10-28 19:02:22] after image: VRAM 15493 MiB
+[2026-10-28 19:02:24] RUN DONE

@@ -1,0 +1,28 @@
+[2026-10-28 18:38:45] pool 2420 MiB, up after 9 s: VRAM 11080 MiB, server RSS 9732092 KiB
+{"label": "saluki@250000", "prompt_tokens": 250068, "wall_s": 836.0, "prefill_tps": 311.4, "decode_tps": 3.9, "draft": "None/None", "needle_found": true, "answer_start": "Question 1: MARMALADE-7\n\nQuestion 2: The file `llama-context.cpp` implements the `llama_context` class, which manages the runtime state for a loaded model. It handles context parameter initialization (context size, threads, RoPE scaling, etc.), memory allocation and backend setup, graph reservation "}
+[2026-10-28 18:52:42] after 250000: VRAM 12263 MiB
+image answer (25.1 s, timings {'prompt_per_second': 286.2, 'predicted_per_second': 38.3}):
+This is a scientific research article page from the *JSME International Journal* (Series A, Vol. 47, No. 4, 2004), specifically page 552.
+
+**Title of the Page/Section:**
+While the page itself does not have a single overarching title, it contains several section headings:
+*   **2.2 Mechanical testing and observation**
+*   **3. Experimental Results and Discussions**
+*   **3.1 The effect of fiber length on mechanical properties of BFGC**
+
+**Table 1: Properties of biodegradable resin used as matrix.**
+
+The column headings for Table 1 are:
+1.  **Property** (implied by the first column containing items like Density, Water absorption, etc.)
+2.  **Value** (implied by the second column containing numerical values)
+
+Specific properties listed in the first column include:
+*   Density (g/cm³)
+*   Water absorption (%)
+*   Tensile strength (MPa)
+*   Tensile elongation (%)
+*   Young's modulus (MPa)
+*   Flexural strength (MPa)
+*   Flexural modulus (MPa)
+[2026-10-28 18:53:07] after image: VRAM 12670 MiB
+[2026-10-28 18:53:09] RUN DONE

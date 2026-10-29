@@ -1,0 +1,9 @@
+[2026-10-28 17:09:18] stream128k up after 10 s: VRAM 14127 MiB, server RSS 5684224 KiB
+{"label": "stream128k@64000", "prompt_tokens": 64069, "wall_s": 117.1, "prefill_tps": 576.8, "decode_tps": 52.5, "draft": "203/436", "needle_found": true, "answer_start": "**Question 1:**\nMARMALADE-7\n\n**Question 2:**\nThe file `llama-context.cpp` implements the `llama_context` class, which serves as the primary runtime environment for executing LLM inference in llama.cpp. It manages the lifecycle of the inference context, including initializing GPU/CPU backends, alloca"}
+[2026-10-28 17:11:15] after 64000: VRAM 15476 MiB
+{"label": "stream128k@125000", "prompt_tokens": 125068, "wall_s": 282.3, "prefill_tps": 464.0, "decode_tps": 34.0, "draft": "193/392", "needle_found": true, "answer_start": "**Question 1:**\nThe code word for the beast test is **MARMALADE-7**.\n\n**Question 2:**\nThe file `llama-context.cpp` implements the `llama_context` class, which serves as the primary runtime interface for executing LLM inference in llama.cpp. It manages the lifecycle of the inference engine, including"}
+[2026-10-28 17:15:58] after 125000: VRAM 15322 MiB
+[2026-10-28 17:16:14] stream200k up after 10 s: VRAM 14444 MiB, server RSS 8052652 KiB
+{"label": "stream200k@195000", "prompt_tokens": 195071, "wall_s": 532.9, "prefill_tps": 379.2, "decode_tps": 16.4, "draft": "198/404", "needle_found": true, "answer_start": "**Question 1:**\nThe code word for the beast test is **MARMALADE-7**.\n\n**Question 2:**\nThe file `llama-context.cpp` implements the `llama_context` class, which serves as the primary runtime interface for executing LLM inference in llama.cpp. It manages the lifecycle of the inference engine, including"}
+[2026-10-28 17:25:07] after 195000: VRAM 15524 MiB
+[2026-10-28 17:25:14] RUN DONE

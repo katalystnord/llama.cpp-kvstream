@@ -1,0 +1,23 @@
+[Unit]
+Description=llama.cpp long context (kv-stream fork): the model chosen in Pi's context lever, KV cache streamed to RAM, port 8090
+# Only one llama.cpp server may hold the GPU: starting this stops the everyday router (llama-server.service), and
+# llama-proxy.socket (port 8080) is paused while this runs, so nothing can wake the router behind its back. The
+# model, size and V cache type come from ~/.config/llama-long.env, written by Pi's context lever (/ctx).
+Conflicts=llama-server.service llama-proxy.service
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/llama-long.env
+Environment="OLLAMA_HOST=127.0.0.1:11434"
+Environment="PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin"
+# Pause the 8080 socket and unload any Ollama model (16 GB card: one model at a time).
+ExecStartPre=%h/.local/bin/llm-gpu-free
+# Adjust the path to where this repository is checked out; MODEL and the other settings come from the EnvironmentFile.
+ExecStart=%h/llama.cpp-kvstream/kvstream/scripts/serve-long.sh ${CTX} 8090
+ExecStartPost=/bin/sh -c 'for i in $(seq 1 200); do curl -sf -m 2 http://127.0.0.1:8090/health >/dev/null && exit 0; sleep 3; done; exit 1'
+ExecStopPost=/bin/systemctl --user --no-block start llama-proxy.socket
+TimeoutStartSec=660
+# The fork can ignore SIGTERM while a request runs.
+KillSignal=SIGKILL
+SuccessExitStatus=SIGKILL
+TimeoutStopSec=10
