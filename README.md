@@ -63,7 +63,8 @@ over the rest, and the GPU merges the two parts exactly by their log-sum-exp. Le
 - HIP (RDNA4) only for now; on other backends it switches itself off with a warning.
 
 Design, every measurement and what is still open: [kvstream/design/split-attention.md](kvstream/design/split-attention.md).
-The work is also on the branch `split-attention` and tagged `split-attention-v1`.
+The work is also on the branch `split-attention`, tagged `split-attention-v1` (the split) and `split-attention-v2` (safe auto
+tuner, CPU kernel 2 to 2.3x faster).
 
 Branches:
 
