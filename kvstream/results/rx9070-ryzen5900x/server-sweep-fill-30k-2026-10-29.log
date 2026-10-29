@@ -1,0 +1,35 @@
+0.00.072.467 I srv  llama_server: initializing ...
+0.00.072.498 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)
+0.00.073.149 W srv  llama_server: security: no API key is set and CORS allows all origins (see https://github.com/ggml-org/llama.cpp/pull/25655)
+0.00.075.936 I srv    load_model: loading model '~/models/gguf/underdog-saluki-27b/Underdog-Saluki-27B-1.0-IQ2-mix.gguf'
+0.06.916.920 I cmn          init: llama threadpool init, n_threads = 12
+0.07.060.150 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 163840, kv_unified = 'false'
+0.07.063.645 W srv          init: chat template supports preserving reasoning, it is enabled by default (may use more tokens, disable via --no-reasoning-preserve)
+0.07.063.680 I srv  llama_server: model loaded
+0.07.063.684 I srv  llama_server: listening on http://127.0.0.1:8099
+0.08.988.900 I slot get_availabl: id  0 | task -1 | selected slot by LRU, n_tokens = 0, t_last = -1
+0.08.988.960 I slot launch_slot_: id  0 | task 0 | processing task, is_child = 0
+0.14.869.569 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =   4096, progress = 0.14, t =   5.88 s / 696.53 tokens per second
+0.18.144.189 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =   6144, progress = 0.20, t =   9.16 s / 671.09 tokens per second
+0.21.480.130 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =   8192, progress = 0.27, t =  12.49 s / 655.83 tokens per second
+0.24.871.892 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  10240, progress = 0.34, t =  15.88 s / 644.72 tokens per second
+0.28.323.371 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  12288, progress = 0.41, t =  19.33 s / 635.55 tokens per second
+0.31.849.502 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  14336, progress = 0.48, t =  22.86 s / 627.11 tokens per second
+0.35.402.162 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  16384, progress = 0.54, t =  26.41 s / 620.30 tokens per second
+0.39.098.242 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  18432, progress = 0.61, t =  30.11 s / 612.17 tokens per second
+0.42.699.993 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  20480, progress = 0.68, t =  33.71 s / 607.52 tokens per second
+0.46.431.043 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  22528, progress = 0.75, t =  37.44 s / 601.68 tokens per second
+0.50.232.777 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  24576, progress = 0.82, t =  41.24 s / 595.87 tokens per second
+0.54.086.556 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  26624, progress = 0.89, t =  45.10 s / 590.36 tokens per second
+0.57.997.378 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  28672, progress = 0.95, t =  49.01 s / 585.04 tokens per second
+1.00.072.590 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  29563, progress = 0.98, t =  51.08 s / 578.72 tokens per second
+1.00.757.635 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  30075, progress = 1.00, t =  51.77 s / 580.95 tokens per second
+1.04.799.593 I slot print_timing: id  0 | task 0 | n_gen =    105, tg =  34.61 t/s, tg_3s =  34.94 t/s
+1.06.062.618 I slot print_timing: id  0 | task 0 | prompt eval time =   52805.39 ms / 30079 tokens (    1.76 ms per token,   569.62 tokens per second)
+1.06.062.621 I slot print_timing: id  0 | task 0 |        eval time =    4268.24 ms /   150 tokens (   28.65 ms per token,    34.91 tokens per second)
+1.06.062.621 I slot print_timing: id  0 | task 0 |       total time =   57073.63 ms / 30229 tokens
+1.06.062.626 I slot print_timing: id  0 | task 0 |    graphs reused =        148
+1.06.062.626 I slot print_timing: id  0 | task 0 |   graph reallocs =         34    /     0        (same size) / (changed size)
+1.06.063.456 I slot      release: id  0 | task 0 | stop processing: n_tokens = 30228, truncated = 0
+1.06.683.996 I slot save_slot_ch: id  0 | task -1 | appended 2 context checkpoint(s) (299.252 MiB) to '~/store/llm-cache/slots/split-sweep-30000.bin'
+1.06.693.061 I srv    operator(): operator(): cleaning up before exit...

@@ -1,0 +1,20 @@
+0.00.034.484 I srv  llama_server: initializing ...
+0.00.034.496 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)
+0.00.034.795 W srv  llama_server: security: no API key is set and CORS allows all origins (see https://github.com/ggml-org/llama.cpp/pull/25655)
+0.00.036.653 I srv    load_model: loading model '~/models/gguf/underdog-saluki-27b/Underdog-Saluki-27B-1.0-IQ2-mix.gguf'
+0.06.618.673 I cmn          init: llama threadpool init, n_threads = 12
+0.06.776.931 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 163840, kv_unified = 'false'
+0.06.780.326 W srv          init: chat template supports preserving reasoning, it is enabled by default (may use more tokens, disable via --no-reasoning-preserve)
+0.06.780.360 I srv  llama_server: model loaded
+0.06.780.365 I srv  llama_server: listening on http://127.0.0.1:8099
+0.09.075.120 I slot load_slot_ch: id  0 | task -1 | restored 2 context checkpoint(s) from '~/store/llm-cache/slots/split-sweep-30000.bin'
+0.09.263.316 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, f_sim_best = 1.000 (> 0.100 thold), f_keep = 0.995
+0.09.263.370 I slot launch_slot_: id  0 | task 1 | processing task, is_child = 0
+0.12.474.376 I slot print_timing: id  0 | task 1 | n_gen =    100, tg =  32.95 t/s, tg_3s =  33.28 t/s
+0.13.868.256 I slot print_timing: id  0 | task 1 | prompt eval time =     206.12 ms /     4 tokens (   51.53 ms per token,    19.41 tokens per second)
+0.13.868.259 I slot print_timing: id  0 | task 1 |        eval time =    4398.74 ms /   150 tokens (   29.52 ms per token,    33.87 tokens per second)
+0.13.868.260 I slot print_timing: id  0 | task 1 |       total time =    4604.86 ms /   154 tokens
+0.13.868.263 I slot print_timing: id  0 | task 1 |    graphs reused =        148
+0.13.868.264 I slot print_timing: id  0 | task 1 |   graph reallocs =          1    /     0        (same size) / (changed size)
+0.13.868.947 I slot      release: id  0 | task 1 | stop processing: n_tokens = 30228, truncated = 0
+0.13.884.458 I srv    operator(): operator(): cleaning up before exit...
