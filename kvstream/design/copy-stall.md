@@ -113,7 +113,10 @@ polls. Options:
 To discuss with achyudh before choosing; then verify with `repro-stall.sh` (7 of 11 deep reads stalled, so a fix needs
 several clean runs to count).
 
-## Draft report for achyudh (not sent)
+## Report to achyudh
+
+Sent 2026-10-29 as a comment on the related open pull request (the fork has no issue tracker):
+https://github.com/achyudh/llama.cpp/pull/1#issuecomment-6508771793. The draft it was based on:
 
 > Title: kv-stream: deadlock between the copy engine's SDMA copies and HIP device-to-host copies (gfx1201, ROCm 7.1)
 >
