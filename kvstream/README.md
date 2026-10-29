@@ -134,9 +134,9 @@ the GPU can attend over the pages it has while the CPU attends over the rest in 
 - Contention measured with the stream running (Saluki at 150K): stream 8.9 to 7.8 t/s, CPU attention 29 to 40-42 ms
   per token, both routes together about 35 GB/s of dual-channel DDR4. Expected gain from the split about 1.45x.
 
-Not built yet: the CPU worker inside the stream that hands its share back for the merge. Until it is built and
-measured, the 1.45x is an estimate. A blocked variant of the CPU kernel is on the branch `cpu-fa-block` (correct to
-5e-8 on the CPU tests; GPU suite and speed not yet run).
+Built on 2026-10-29 (`LLAMA_KV_SPLIT`): see [the root README](../README.md#split-attention) and the design note for
+the measurements (Saluki at 150K: 8.9 -> 11.4 t/s, answers identical). A blocked variant of the CPU kernel is on the
+branch `cpu-fa-block` (correct to 5e-8 on the CPU tests; GPU suite and speed not yet run).
 
 ## Build
 
@@ -172,7 +172,8 @@ author's setup.
 
 ## Open
 
-- The CPU worker for split attention (above), then measuring it at 125K to 250K.
+- Split attention with speculative decoding (4 to 5 query tokens exceed the whole-rows CPU path's 64 query vectors),
+  and measuring it at 125K to 250K.
 - Intermittent copy stall while reading a long prompt (1 of 4 runs past 160K).
 - A bigger prefill pool (`--kv-resident-mib`, now 450) for models with small weights: reading is the slow part at
   depth.

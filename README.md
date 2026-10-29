@@ -41,19 +41,42 @@ On top of b540a4b9b:
   of the attention can be merged exactly.
 - `ggml-cpu: grouped-query decode path for flash attention`: each K/V row read once for all query heads that share
   it, 1.5x faster CPU attention at depth.
+- Split attention (below): `kv-stream: split attention, the CPU attends the oldest cold pages in place`,
+  `ggml-cpu: grouped-query decode reads whole rows when KV heads share a row`, `kv-stream: LLAMA_KV_SPLIT=auto`.
+
+## Split attention
+
+At long context most of the cache streams from host RAM over PCIe for every written token, and the link is the
+bound. With `LLAMA_KV_SPLIT=auto` the CPU attends over the oldest cold pages in place in RAM while the GPU attends
+over the rest, and the GPU merges the two parts exactly by their log-sum-exp. Less crosses the link.
+
+| Saluki 27B, RX 9070, 2420 MiB pool, no drafting | write t/s |
+|---|---|
+| 150K tokens, no split | 8.9 |
+| 150K tokens, auto (settles at 30% of the streamed pages on the CPU, 16 threads) | 11.4 at that share (+28%) |
+| 30K tokens (the cache fits on the GPU), no split / auto | 33.7 to 33.9 / 33.8 to 33.9; auto never splits |
+
+- Exact: greedy answers with and without the split were word for word identical.
+- No regressions by construction: nothing splits while every attended page is on the GPU, and auto starts at no split
+  and keeps a larger CPU share only while each token gets faster.
+- Off unless `LLAMA_KV_SPLIT` is set (`auto`, or a fixed fraction); `LLAMA_KV_SPLIT_THREADS` sets the CPU threads.
+- HIP (RDNA4) only for now; on other backends it switches itself off with a warning.
+
+Design, every measurement and what is still open: [kvstream/design/split-attention.md](kvstream/design/split-attention.md).
+The work is also on the branch `split-attention` and tagged `split-attention-v1`.
 
 Branches:
 
 | branch | contents |
 |---|---|
-| `main` | the commits above and the `kvstream/` folder |
+| `main` | everything above and the `kvstream/` folder |
+| `split-attention` | the split attention work, commit by commit (merged into `main`) |
 | `cpu-fa-block` | the grouped-query CPU path in blocks of 16 rows; CPU tests pass, not yet measured |
 
 ## Status
 
-Work in progress. The next step is the CPU worker inside the stream that completes split attention; the design and
-the measurements so far (expected gain about 1.45x at depth on this machine) are in
-[kvstream/design/split-attention.md](kvstream/design/split-attention.md). Known limits:
+Work in progress. Next: the CPU half with speculative decoding (verifying 4 to 5 drafted tokens), and the same split
+on NVIDIA through RaymondHuang's CUDA design on a second machine. Known limits:
 
 - Only models whose attention has head size 256 and 6 query heads per KV head stream (Qwen3.8 27B and derivatives).
 - Linux with ROCm and an RDNA4 GPU (gfx1201) is the only tested path; NVIDIA cards are untested with this fork.
