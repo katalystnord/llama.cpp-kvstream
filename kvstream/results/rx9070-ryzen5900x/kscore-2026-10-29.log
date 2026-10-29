@@ -1,0 +1,21 @@
+== test-backend-ops FLASH_ATTN_EXT
+      1   4448/4448 tests passed
+== Saluki 150K no drafting: auto, step 0.1, per token
+  {"label": "fauto-t16", "prompt_tokens": 150070, "wall_s": 15.8, "prefill_tps": 3.6, "decode_tps": 11.0, "draft": "None/None", "needle_found": true, 
+  {"label": "f0.3-t16", "prompt_tokens": 150070, "wall_s": 14.6, "prefill_tps": 12.6, "decode_tps": 11.3, "draft": "None/None", "needle_found": true, 
+  {"label": "f0.4-t16", "prompt_tokens": 150070, "wall_s": 14.2, "prefill_tps": 10.9, "decode_tps": 11.7, "draft": "None/None", "needle_found": true, 
+  llama_kv_stream: split auto: share 0.00: 106.4 ms per token
+  llama_kv_stream: split auto: share 0.10: 104.0 ms per token
+  llama_kv_stream: split auto: share 0.20: 92.8 ms per token
+  llama_kv_stream: split auto: share 0.30: 82.6 ms per token
+  llama_kv_stream: split auto: share 0.40: 84.9 ms per token
+  llama_kv_stream: split auto: settled at 0.30 (82.6 ms per token, 348 streamed pages)
+== Qwen3.8 MTP 125K: auto, step 0.1, per token
+  {"label": "f0-t0", "prompt_tokens": 125068, "wall_s": 9.5, "prefill_tps": 9.5, "decode_tps": 32.6, "draft": "194/388", "needle_found": true, 
+  {"label": "fauto-t16", "prompt_tokens": 125068, "wall_s": 9.2, "prefill_tps": 9.9, "decode_tps": 33.6, "draft": "193/396", "needle_found": true, 
+  {"label": "f0.2-t16", "prompt_tokens": 125068, "wall_s": 15.9, "prefill_tps": 5.5, "decode_tps": 19.6, "draft": "199/384", "needle_found": true, 
+  {"label": "f0.3-t16", "prompt_tokens": 125068, "wall_s": 12.1, "prefill_tps": 9.3, "decode_tps": 23.1, "draft": "177/356", "needle_found": true, 
+  llama_kv_stream: split auto: share 0.00: 21.6 ms per token
+  llama_kv_stream: split auto: share 0.10: 27.2 ms per token
+  llama_kv_stream: split auto: settled at 0.00 (21.6 ms per token, 237 streamed pages)
+TUNER3 DONE

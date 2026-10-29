@@ -9560,6 +9560,54 @@ static void ggml_flash_attn_ext_reduce_partials(
 // writes the LSE (ggml_flash_attn_ext_lse). The output accumulates in f32 for every V type.
 #define GGML_FA_GQA_MAX_NQ 64 // query vectors (query rows x query heads per KV head) a work item handles
 
+#if defined(__AVX2__)
+#include <immintrin.h>
+
+// Scores of a block of the grouped-query decode path, q8_0 K against q8_0 query vectors: out[j*ldo + t] = q_j . k_t
+// for nq query vectors (q_row bytes apart) and nt K rows (krow), nb blocks of 32 each. The arithmetic of
+// ggml_vec_dot_q8_0_q8_0 (AVX2) in the same order, but each 32-byte part of a K row is loaded once for up to 8 query
+// vectors held in registers, and there is no call per (row, query vector).
+static inline float ggml_fa_gqa_hsum_8(const __m256 x) {
+    __m128 res = _mm_add_ps(_mm256_extractf128_ps(x, 1), _mm256_castps256_ps128(x));
+    res = _mm_add_ps(res, _mm_movehl_ps(res, res));
+    res = _mm_add_ss(res, _mm_movehdup_ps(res));
+    return _mm_cvtss_f32(res);
+}
+
+static void ggml_fa_gqa_scores_q8_0(const char * const * krow, int64_t nt, const char * q, size_t q_row, int64_t nq,
+        int64_t nb, float * out, int64_t ldo) {
+    constexpr size_t bs = sizeof(ggml_fp16_t) + 32; // a q8_0 block: f16 scale, 32 int8
+    const __m256i ones = _mm256_set1_epi16(1);
+    for (int64_t j0 = 0; j0 < nq; j0 += 8) {
+        const int64_t jn = std::min<int64_t>(8, nq - j0);
+        for (int64_t t = 0; t < nt; ++t) {
+            __m256 acc[8];
+            for (int a = 0; a < 8; ++a) {
+                acc[a] = _mm256_setzero_ps();
+            }
+            for (int64_t b = 0; b < nb; ++b) {
+                const char *  kb = krow[t] + b*bs;
+                const float   dk = GGML_CPU_FP16_TO_FP32(*(const ggml_fp16_t *) kb);
+                const __m256i kx = _mm256_loadu_si256((const __m256i *) (kb + sizeof(ggml_fp16_t)));
+                const __m256i ax = _mm256_sign_epi8(kx, kx);
+                for (int a = 0; a < 8; ++a) {
+                    if (a < jn) {
+                        const char *  qb  = q + (j0 + a)*q_row + b*bs;
+                        const __m256i qy  = _mm256_loadu_si256((const __m256i *) (qb + sizeof(ggml_fp16_t)));
+                        const __m256i dot = _mm256_madd_epi16(ones, _mm256_maddubs_epi16(ax, _mm256_sign_epi8(qy, kx)));
+                        const __m256  d   = _mm256_set1_ps(dk*GGML_CPU_FP16_TO_FP32(*(const ggml_fp16_t *) qb));
+                        acc[a] = _mm256_fmadd_ps(d, _mm256_cvtepi32_ps(dot), acc[a]);
+                    }
+                }
+            }
+            for (int a = 0; a < jn; ++a) {
+                out[(j0 + a)*ldo + t] = ggml_fa_gqa_hsum_8(acc[a]);
+            }
+        }
+    }
+}
+#endif
+
 // KV heads a work item takes when they lie side by side in a row: the most that divide them and keep its query vectors
 // within GGML_FA_GQA_MAX_NQ (ggml_graph_plan sizes the work buffer the same way)
 static int64_t ggml_flash_attn_ext_gqa_heads_per_item(int64_t nq, int64_t n_head_kv) {
@@ -9658,6 +9706,11 @@ static void ggml_compute_forward_flash_attn_ext_gqa(
     float               slope[GGML_FA_GQA_MAX_NQ];
     const ggml_fp16_t * mrow[GGML_FA_GQA_MAX_NQ];
     float               P[GGML_FA_GQA_MAX_NQ][B];   // a block's scores, then its softmax weights
+#if defined(__AVX2__)
+    const bool scores_batched = k->type == GGML_TYPE_Q8_0 && k_vec_dot_type == GGML_TYPE_Q8_0 && DK % 32 == 0;
+#else
+    const bool scores_batched = false;
+#endif
     const float *       vrow[GGML_FA_GQA_MAX_NQ*B]; // [KV head][row] V in f32, nullptr where every query masks the row
 
     for (int64_t item = ith; item < (nek2/G)*n_chunks; item += nth) {
@@ -9683,6 +9736,18 @@ static void ggml_compute_forward_flash_attn_ext_gqa(
         for (int64_t ib = ic0; ib < ic1; ib += B) {
             const int64_t nt = std::min(B, ic1 - ib);
 
+#if defined(__AVX2__)
+            // q8_0 K and query vectors: the block's scores of each KV head in one batch (masked ones are overwritten)
+            if (scores_batched) {
+                for (int64_t g = 0; g < G; ++g) {
+                    const char * krow[B];
+                    for (int64_t t = 0; t < nt; ++t) {
+                        krow[t] = (const char *) k->data + (ib + t)*nbk1 + (ik20 + g)*nbk2;
+                    }
+                    ggml_fa_gqa_scores_q8_0(krow, nt, Q_q + g*NQ*q_row, q_row, NQ, DK/32, &P[g*NQ][0], B);
+                }
+            }
+#endif
             for (int64_t t = 0; t < nt; ++t) {
                 const int64_t ic = ib + t;
                 // the item's KV heads in row order
@@ -9697,7 +9762,11 @@ static void ggml_compute_forward_flash_attn_ext_gqa(
                             continue;
                         }
                         float sv;
-                        kq_vec_dot(DK, &sv, 0, k_data, 0, Q_q + j*q_row, 0, 1);
+                        if (scores_batched) {
+                            sv = P[j][t];
+                        } else {
+                            kq_vec_dot(DK, &sv, 0, k_data, 0, Q_q + j*q_row, 0, 1);
+                        }
                         sv = sv*scale;
                         if (logit_softcap != 0.0f) {
                             sv = logit_softcap*tanhf(sv);
@@ -9736,7 +9805,17 @@ static void ggml_compute_forward_flash_attn_ext_gqa(
                     S[j] *= ms;
                     M[j]  = bm;
                 }
-                for (int64_t t = 0; t < nt; ++t) {
+                int64_t t = 0;
+#if defined(__AVX2__) && defined(__FMA__)
+                // 8 rows at a time (ggml_v_expf flushes -inf, a masked row, to 0)
+                const __m256 mj = _mm256_set1_ps(M[j]);
+                for (; t + 8 <= nt; t += 8) {
+                    const __m256 pv = ggml_v_expf(_mm256_sub_ps(_mm256_loadu_ps(&P[j][t]), mj));
+                    _mm256_storeu_ps(&P[j][t], pv);
+                    S[j] += ggml_fa_gqa_hsum_8(pv);
+                }
+#endif
+                for (; t < nt; ++t) {
                     const float pv = P[j][t] == -INFINITY ? 0.0f : expf(P[j][t] - M[j]);
                     P[j][t] = pv;
                     S[j]   += pv;
