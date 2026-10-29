@@ -11,6 +11,7 @@
 #include "ggml-cpu.h"
 #include "ggml-backend.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -21,6 +22,7 @@
 #include <vector>
 
 static const int64_t D = 256, N_HEAD_KV = 4, N_HEAD = 24, N_LAYER = 16;
+static int64_t N_TOK = 1; // query tokens (FA_NTOK): 1 for decode, up to 5 when verifying drafts
 
 static double now() {
     return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
@@ -41,7 +43,7 @@ static void attend(ggml_threadpool * tp, int nth, std::vector<uint8_t> & work, c
         }
         return t;
     };
-    ggml_tensor * tq = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, D, 1, N_HEAD);
+    ggml_tensor * tq = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, D, N_TOK, N_HEAD);
     tq->data = (void *) q;
     ggml_tensor * fa = ggml_flash_attn_ext(ctx, tq, heads(k), heads(v), nullptr, 1.0f/16, 0.0f, 0.0f);
     fa->data = out;
@@ -67,6 +69,9 @@ int main(int argc, char ** argv) {
         threads = { 8, 12, 16, 24 };
     }
     ggml_backend_load_all();
+    if (const char * nt = getenv("FA_NTOK")) {
+        N_TOK = std::max<int64_t>(1, atoll(nt));
+    }
 
     const size_t row_head  = ggml_row_size(GGML_TYPE_Q8_0, D);
     const size_t layer_kv  = (size_t) rows*N_HEAD_KV*row_head; // bytes of K (or V) per layer
@@ -102,11 +107,11 @@ int main(int argc, char ** argv) {
         }
     }
 
-    std::vector<float> q(D*N_HEAD);
+    std::vector<float> q(D*N_HEAD*N_TOK);
     for (auto & x : q) {
         x = nd(rng);
     }
-    std::vector<float> out(D*N_HEAD), lse(N_HEAD);
+    std::vector<float> out(D*N_HEAD*N_TOK), lse(N_HEAD*N_TOK);
     std::vector<uint8_t> work;
 
     // correctness: the same K/V in both layouts must give the same result (the interleaved layout takes the path whose
@@ -120,7 +125,7 @@ int main(int argc, char ** argv) {
                 memcpy(vh.data() + (h*rows + r)*row_head, vsrc + (r*N_HEAD_KV + h)*row_head, row_head);
             }
         }
-        std::vector<float> o1(D*N_HEAD), o2(D*N_HEAD), l1(N_HEAD), l2(N_HEAD);
+        std::vector<float> o1(D*N_HEAD*N_TOK), o2(D*N_HEAD*N_TOK), l1(N_HEAD*N_TOK), l2(N_HEAD*N_TOK);
         ggml_threadpool_params tpp = ggml_threadpool_params_default(8);
         ggml_threadpool * tp = ggml_threadpool_new(&tpp);
         attend(tp, 8, work, q.data(), layer.data(), layer.data(), rows, true, o1.data(), l1.data());
@@ -133,7 +138,8 @@ int main(int argc, char ** argv) {
                 dout < 1e-4 && dlse < 1e-4 ? "ok" : "FAIL");
     }
 
-    printf("%lld rows per layer, %lld layers, %.1f MB of K/V per pass\n", (long long) rows, (long long) N_LAYER, total/1e6);
+    printf("%lld rows per layer, %lld layers, %lld query tokens, %.1f MB of K/V per pass\n", (long long) rows,
+            (long long) N_LAYER, (long long) N_TOK, total/1e6);
     printf("%-34s %-11s %5s %7s %10s %8s\n", "memory", "layout", "calls", "threads", "ms/pass", "GB/s");
     for (auto & m : mems) {
         for (bool interleaved : { true, false }) {

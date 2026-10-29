@@ -9560,6 +9560,17 @@ static void ggml_flash_attn_ext_reduce_partials(
 // writes the LSE (ggml_flash_attn_ext_lse). The output accumulates in f32 for every V type.
 #define GGML_FA_GQA_MAX_NQ 64 // query vectors (query rows x query heads per KV head) a work item handles
 
+// KV heads a work item takes when they lie side by side in a row: the most that divide them and keep its query vectors
+// within GGML_FA_GQA_MAX_NQ (ggml_graph_plan sizes the work buffer the same way)
+static int64_t ggml_flash_attn_ext_gqa_heads_per_item(int64_t nq, int64_t n_head_kv) {
+    for (int64_t g = n_head_kv; g > 1; --g) {
+        if (n_head_kv % g == 0 && nq*g <= GGML_FA_GQA_MAX_NQ) {
+            return g;
+        }
+    }
+    return 1;
+}
+
 static int64_t ggml_flash_attn_ext_gqa_n_chunks(int64_t n_kv, int64_t n_head_kv, int nth) {
     // about two items per thread, chunks of at least 256 K/V rows (at most 2*nth chunks: the work buffer is sized so)
     const int64_t n = std::max<int64_t>(1, (2*nth + n_head_kv - 1)/n_head_kv);
@@ -9617,9 +9628,13 @@ static void ggml_compute_forward_flash_attn_ext_gqa(
     const int ith = params->ith;
     const int nth = params->nth;
 
-    // KV heads side by side in each row (a KV cache's rows): a work item takes all of them (G KV heads, NQ*G query
-    // vectors) so that its thread reads whole rows in order instead of a part of every row; 1.5x on a Ryzen 9 5900X
-    const int64_t G   = nbk2 < nbk1 && nbv2 < nbv1 && NQ*nek2 <= GGML_FA_GQA_MAX_NQ ? nek2 : 1;
+    // KV heads side by side in each row (a KV cache's rows): a work item takes as many of them as its query vectors
+    // allow (G KV heads, NQ*G query vectors, G dividing the KV heads), so that its thread reads whole rows, or the
+    // largest part of them, in order instead of a part of every row; 1.3x on a Ryzen 9 5900X for whole rows
+    int64_t G = 1;
+    if (nbk2 < nbk1 && nbv2 < nbv1) {
+        G = ggml_flash_attn_ext_gqa_heads_per_item(NQ, nek2);
+    }
     const int64_t NQI = NQ*G;
 
     const int64_t n_chunks   = ggml_flash_attn_ext_gqa_n_chunks(nek1, nek2/G, nth);

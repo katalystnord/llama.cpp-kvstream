@@ -3009,8 +3009,15 @@ struct ggml_cplan ggml_graph_plan(
                         // query vectors, a V row and the query vectors converted for the K dot product
                         const int64_t N    = node->src[0]->ne[1];
                         const int64_t nek2 = MAX(node->src[1]->ne[2], 1);
-                        // (a work item takes every KV head when they lie side by side in a row and all query vectors fit)
-                        const int64_t NQ   = N*neq2 <= 64 ? N*neq2 : N*(neq2/nek2);
+                        // (a work item takes several KV heads when they lie side by side in a row: the most that
+                        // divide them with at most GGML_FA_GQA_MAX_NQ (64) query vectors, as in ops.cpp)
+                        int64_t NQ = N*(neq2/nek2);
+                        for (int64_t g = nek2; g > 1; --g) {
+                            if (nek2 % g == 0 && NQ*g <= 64) {
+                                NQ *= g;
+                                break;
+                            }
+                        }
                         size_t gqa = sizeof(float)*(N*neq2*2*n_tasks*(2+DV) + n_tasks*(NQ*(DV + 2 + DK) + DV + CACHE_LINE_SIZE/sizeof(float)));
 
                         cur += MAX(MAX(prefill, decode), gqa);
