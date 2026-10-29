@@ -8931,6 +8931,16 @@ void ggml_compute_forward_top_k(
     }
 }
 
+// Optional per-row log-sum-exp output (op_params[GGML_FA_PARAM_LSE] holds a host pointer, as the CUDA kernels take a
+// device one): for query row i1 of sequence i3 and head i2, lse[(i3*ne01 + i1)*ne02 + i2] = M + log(S), the max and the
+// sum of exp of the scaled, softcapped and masked logits (a sink is part of S). Results over disjoint K/V parts merge
+// exactly with it. Rows with no visible K/V get -inf.
+static float * ggml_flash_attn_ext_lse(const ggml_tensor * dst) {
+    float * lse = nullptr;
+    memcpy(&lse, dst->op_params + GGML_FA_PARAM_LSE, sizeof(lse));
+    return lse;
+}
+
 static void ggml_compute_forward_flash_attn_ext_f16_one_chunk(
         const ggml_compute_params * params,
         ggml_tensor * dst,
@@ -8944,6 +8954,7 @@ static void ggml_compute_forward_flash_attn_ext_f16_one_chunk(
     const ggml_tensor * v     = dst->src[2];
     const ggml_tensor * mask  = dst->src[3];
     const ggml_tensor * sinks = dst->src[4];
+    float * const       lse   = ggml_flash_attn_ext_lse(dst);
 
     GGML_TENSOR_LOCALS(int64_t, neq, q,   ne)
     GGML_TENSOR_LOCALS(size_t,  nbq, q,   nb)
@@ -9163,6 +9174,10 @@ static void ggml_compute_forward_flash_attn_ext_f16_one_chunk(
             const int i2 = iq2;
             const int i3 = iq3;
 
+            if (lse) {
+                lse[(i3*neq1 + i1)*neq2 + i2] = S == 0.0f ? -INFINITY : M + logf(S);
+            }
+
             // permute(0, 2, 1, 3)
             memcpy((char *) dst->data + (i3*ne2*ne1 + i2 + i1*ne1)*nb1, VKQ32, nb1);
         }
@@ -9178,6 +9193,7 @@ static void ggml_compute_forward_flash_attn_ext_tiled(
     const ggml_tensor * v     = dst->src[2];
     const ggml_tensor * mask  = dst->src[3];
     const ggml_tensor * sinks = dst->src[4];
+    float * const       lse   = ggml_flash_attn_ext_lse(dst);
 
     GGML_TENSOR_LOCALS(int64_t, neq, q,   ne)
     GGML_TENSOR_LOCALS(size_t,  nbq, q,   nb)
@@ -9449,6 +9465,10 @@ static void ggml_compute_forward_flash_attn_ext_tiled(
             const int i2 = iq2;
             const int i3 = iq3;
 
+            if (lse) {
+                lse[(i3*neq1 + i1)*neq2 + i2] = S[tq] == 0.0f ? -INFINITY : M[tq] + logf(S[tq]);
+            }
+
             // permute(0, 2, 1, 3)
             memcpy((char *) dst->data + (i3*ne2*ne1 + i2 + i1*ne1)*nb1, VKQ32 + tq * DV, nb1);
         }
@@ -9473,6 +9493,7 @@ static void ggml_flash_attn_ext_reduce_partials(
     const int64_t DV        = v->ne[0];
     const int64_t nek1      = k->ne[1];
     const int64_t n_q_heads = q->ne[2];
+    float * const lse       = ggml_flash_attn_ext_lse(dst);
 
     const int ith = params->ith;
     const int nth = params->nth;
@@ -9526,6 +9547,9 @@ static void ggml_flash_attn_ext_reduce_partials(
         }
         // iq1=0, iq3=0 for decode
         memcpy((char *) dst->data + (0*ne2*ne1 + q_head + 0*ne1)*nb1, VKQ_final, nb1);
+        if (lse) {
+            lse[q_head] = S_final == 0.0f ? -INFINITY : M_final + logf(S_final);
+        }
     }
 }
 
