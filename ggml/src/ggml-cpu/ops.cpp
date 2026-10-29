@@ -9553,7 +9553,7 @@ static void ggml_flash_attn_ext_reduce_partials(
     }
 }
 
-// Decode with grouped-query attention (beast, 2026-10-28): one work item per (KV head, chunk of K/V) serves every
+// Decode with grouped-query attention: one work item per (KV head, chunk of K/V) serves every
 // query head of the group and every query row at once, so each K row is read and each V row converted once instead of
 // once per query head (6 times for Qwen3.8). For few query rows (decode, drafts) over a long K/V; per-head paths
 // (one_chunk) read the same rows rk2 times. Partials per (row, query head, chunk) are merged at the end, which also

@@ -1,7 +1,7 @@
 #pragma once
 
 // Decode attention over contiguous or paged K/V for Q8_0 K and Q4_0 or Q8_0 V (template VQ8), head size 256, GQA 6,
-// 1-8 query tokens, RDNA4 WMMA. The Q8_0 V variant (beast, 2026-10-28) exists for coding work, where a Q4_0 V cache
+// 1-8 query tokens, RDNA4 WMMA. The Q8_0 V variant exists for coding work, where a Q4_0 V cache
 // measurably hurt the model's reasoning. Plain HIP (no ggml dependencies); ggml's dispatch lives in fattn-paged-decode.cu.
 
 #include <hip/hip_runtime.h>

@@ -10732,7 +10732,7 @@ static const ggml_type other_types[] = {
 static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
     std::vector<std::unique_ptr<test_case>> test_cases;
 
-    // The paged decode kernel's cases run for Q4_0 V (the fork's original) and Q8_0 V (beast, 2026-10-28).
+    // The paged decode kernel's cases run for Q4_0 V (the fork's original) and Q8_0 V.
     for (ggml_type type_V : { GGML_TYPE_Q4_0, GGML_TYPE_Q8_0, }) {
         // Decode shapes of the RDNA4 Q8_0/Q4_0 paged decode kernel (4 KV heads x GQA 6, head 256, 1-8 query tokens).
         for (int kv : { 256, 1000, 8192, 32768, }) {
@@ -13609,9 +13609,9 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_perf() {
         test_cases.emplace_back(new test_flash_attn_ext(256, 256, 2, {12, 1}, kv, 1, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_Q8_0, GGML_TYPE_Q8_0, {0, 1, 2, 3}, true, false, 0));
     }
 
-    // beast (2026-10-28): decode over a long q8_0 cache in host memory, Qwen3.8 / Saluki shape (4 KV heads x 256, GQA 6),
+    // Decode over a long q8_0 cache in host memory, Qwen3.8 / Saluki shape (4 KV heads x 256, GQA 6),
     // larger than the CPU's last-level cache: how fast CPU attention reads KV (the CPU route of the split-attention
-    // design, beast/design/split-attention.md)
+    // design, kvstream/design/split-attention.md)
     for (int64_t kv : {65536, 262144}) {
         test_cases.emplace_back(new test_flash_attn_ext(256, 256, 4, {6, 1}, kv, 1, true, false, 0, 0, GGML_PREC_F32, GGML_TYPE_Q8_0, GGML_TYPE_Q8_0));
     }

@@ -267,7 +267,7 @@ void ggml_cuda_flash_attn_ext_paged_decode(ggml_backend_cuda_context & ctx, ggml
     // the kernel indexes mask rows by K/V column
     const char * mask_data = mask ? (const char *) mask->data - (ptrdiff_t) mask_col0*sizeof(half) : nullptr;
     const int64_t mask_nb1 = mask ? mask->nb[1] : 0;
-    const bool vq8 = V->type == GGML_TYPE_Q8_0; // Q8_0 V variant (beast); Q4_0 V otherwise
+    const bool vq8 = V->type == GGML_TYPE_Q8_0; // Q8_0 V variant; Q4_0 V otherwise
 #define PD_ARGS (const char *) Q->data, Q->nb[1], Q->nb[2], kv_k, kv_v, sync, \
         mask_data, mask_nb1, mask_col0, scale, n_kv, nb, n_chunks, chunks_per_split, O_part, ML_part
 #define PD_LAUNCH(M, P, MT) do { \
