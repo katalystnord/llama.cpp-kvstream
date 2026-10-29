@@ -1,0 +1,19 @@
+[2026-10-29 18:34:50] plain: ~/store/code/scratch/llama.cpp/build/bin/llama-server, 48K window, q8_0 K and V
+[2026-10-29 18:34:57] plain up, VRAM 15224 MiB
+{"label": "plain@8000", "prompt_tokens": 8070, "wall_s": 14.1, "prefill_tps": 811.6, "decode_tps": 43.6, "draft": "114/256", "needle_found": true, 
+{"label": "plain@32000", "prompt_tokens": 32068, "wall_s": 49.3, "prefill_tps": 738.3, "decode_tps": 33.4, "draft": "108/288", "needle_found": true, 
+{"label": "plain@45000", "prompt_tokens": 45069, "wall_s": 71.8, "prefill_tps": 688.0, "decode_tps": 35.2, "draft": "122/264", "needle_found": true, 
+[2026-10-29 18:37:18] spill 1: ~/store/code/scratch/llama.cpp/build/bin/llama-server --no-kv-offload, 131K window
+[2026-10-29 18:37:26] spill 1 up, VRAM 13369 MiB
+{"label": "nkvo@64000", "prompt_tokens": 64069, "wall_s": 220.1, "prefill_tps": 387.2, "decode_tps": 5.2, "draft": "185/392", "needle_found": true, 
+{"label": "nkvo@125000", "prompt_tokens": 125068, "wall_s": 451.7, "prefill_tps": 315.6, "decode_tps": 3.6, "draft": "128/252", "needle_found": true, 
+[2026-10-29 18:48:44] spill 2: unified memory, HIP build without the stream, 131K window
+[2026-10-29 18:49:08] spill 2 up, VRAM 1725 MiB
+{"label": "unified@125000", "prompt_tokens": 125068, "wall_s": 1316.2, "prefill_tps": 101.3, "decode_tps": 3.2, "draft": "176/348", "needle_found": true, 
+[2026-10-29 19:11:11] stream: serve-long.sh, 204800 window
+[2026-10-29 19:11:40] stream up, VRAM 15032 MiB
+{"label": "stream@8000", "prompt_tokens": 8070, "wall_s": 15.5, "prefill_tps": 704.6, "decode_tps": 55.1, "draft": "136/340", "needle_found": true, 
+{"label": "stream@32000", "prompt_tokens": 32068, "wall_s": 53.3, "prefill_tps": 651.2, "decode_tps": 53.2, "draft": "118/284", "needle_found": true, 
+{"label": "stream@64000", "prompt_tokens": 64069, "wall_s": 119.6, "prefill_tps": 575.0, "decode_tps": 52.8, "draft": "203/436", "needle_found": true, 
+[2026-10-29 19:14:55] router socket started again
+[2026-10-29 19:14:56] RUN DONE

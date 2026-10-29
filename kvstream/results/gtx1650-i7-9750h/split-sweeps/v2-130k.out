@@ -1,0 +1,18 @@
+[17:26:57] fnone-t0-130000: restored: {"id_slot":0,"filename":"fill-131072-896-130000.bin","n_restored":130063,"n_read":1893115392,"timings":{"restore_ms":520.313}}
+{"label": "v2-130k-fnone-t0-130000", "prompt_tokens_requested": 130000, "start": "17:26:57", "prompt_n": 4, "prefill_tps": 9.63, "gen_n": 64, "decode_tps": 8.66, "text": "\n\n<think>\nThinking Process:\n\n1.  **Analyze the Request:**\n    *   Input: A long tex
+[17:27:12] f0.3-t6-130000: restored: {"id_slot":0,"filename":"fill-131072-896-130000.bin","n_restored":130063,"n_read":1893115392,"timings":{"restore_ms":546.553}}
+{"label": "v2-130k-f0.3-t6-130000", "prompt_tokens_requested": 130000, "start": "17:27:12", "prompt_n": 4, "prefill_tps": 8.71, "gen_n": 64, "decode_tps": 9.9, "text": "\n\n<think>\nThinking Process:\n\n1.  **Analyze the Request:**\n    *   Input: A long text 
+0.08.434.357 W split: context 130048, CPU takes 165888 tokens in 8 of 8 layers; per step: CPU waited 0.1 ms for Q, attended 32.4 ms (8.3 GB/s), host blocked 31.1 ms
+[17:27:26] f0.4-t6-130000: restored: {"id_slot":0,"filename":"fill-131072-896-130000.bin","n_restored":130063,"n_read":1893115392,"timings":{"restore_ms":513.933}}
+{"label": "v2-130k-f0.4-t6-130000", "prompt_tokens_requested": 130000, "start": "17:27:26", "prompt_n": 4, "prefill_tps": 8.69, "gen_n": 64, "decode_tps": 9.98, "text": "\n\n<think>\nThinking Process:\n\n1.  **Analyze the Request:**\n    *   Input: A long text
+0.08.392.455 W split: context 130048, CPU takes 221184 tokens in 8 of 8 layers; per step: CPU waited 0.1 ms for Q, attended 46.7 ms (7.6 GB/s), host blocked 45.9 ms
+[17:27:40] f0.5-t6-130000: restored: {"id_slot":0,"filename":"fill-131072-896-130000.bin","n_restored":130063,"n_read":1893115392,"timings":{"restore_ms":512.149}}
+{"label": "v2-130k-f0.5-t6-130000", "prompt_tokens_requested": 130000, "start": "17:27:40", "prompt_n": 4, "prefill_tps": 8.39, "gen_n": 64, "decode_tps": 10.15, "text": "\n\n<think>\nThinking Process:\n\n1.  **Analyze the Request:**\n    *   Input: A long tex
+0.08.282.140 W split: context 130048, CPU takes 278528 tokens in 8 of 8 layers; per step: CPU waited 0.1 ms for Q, attended 47.9 ms (9.4 GB/s), host blocked 46.9 ms
+[17:27:54] f0.6-t6-130000: restored: {"id_slot":0,"filename":"fill-131072-896-130000.bin","n_restored":130063,"n_read":1893115392,"timings":{"restore_ms":510.196}}
+{"label": "v2-130k-f0.6-t6-130000", "prompt_tokens_requested": 130000, "start": "17:27:54", "prompt_n": 4, "prefill_tps": 8.7, "gen_n": 64, "decode_tps": 9.36, "text": "\n\n<think>\nThinking Process:\n\n1.  **Analyze the Request:**\n    *   Input: A long text 
+0.08.493.106 W split: context 130048, CPU takes 333824 tokens in 8 of 8 layers; per step: CPU waited 0.1 ms for Q, attended 58.9 ms (9.1 GB/s), host blocked 58.1 ms
+[17:28:09] f0.7-t6-130000: restored: {"id_slot":0,"filename":"fill-131072-896-130000.bin","n_restored":130063,"n_read":1893115392,"timings":{"restore_ms":530.242}}
+{"label": "v2-130k-f0.7-t6-130000", "prompt_tokens_requested": 130000, "start": "17:28:09", "prompt_n": 4, "prefill_tps": 8.91, "gen_n": 64, "decode_tps": 6.7, "text": "\n\n<think>\nThinking Process:\n\n1.  **Analyze the Request:**\n    *   Input: A long text 
+0.09.473.422 W split: context 130048, CPU takes 389120 tokens in 8 of 8 layers; per step: CPU waited 0.1 ms for Q, attended 90.3 ms (6.9 GB/s), host blocked 89.8 ms
+[17:28:21] SWEEP DONE

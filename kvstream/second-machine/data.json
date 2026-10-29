@@ -1,0 +1,253 @@
+[
+ {
+  "machine": "gtx1650-i7-9750h",
+  "label": "plain",
+  "metric": "write_tps",
+  "points": [
+   [
+    8068,
+    25.7
+   ],
+   [
+    32069,
+    19.2
+   ],
+   [
+    42076,
+    17.4
+   ]
+  ],
+  "needle_found": [
+   true,
+   true,
+   true
+  ],
+  "source": "plain-43008.jsonl",
+  "log": "server-plain-43008.log"
+ },
+ {
+  "machine": "gtx1650-i7-9750h",
+  "label": "stream",
+  "metric": "write_tps",
+  "points": [
+   [
+    8068,
+    25.5
+   ],
+   [
+    32069,
+    19.0
+   ],
+   [
+    64067,
+    13.9
+   ],
+   [
+    125068,
+    7.0
+   ]
+  ],
+  "needle_found": [
+   true,
+   true,
+   true,
+   true
+  ],
+  "source": "stream.jsonl",
+  "log": "server-stream.log"
+ },
+ {
+  "machine": "gtx1650-i7-9750h",
+  "label": "spill 1",
+  "metric": "write_tps",
+  "points": [
+   [
+    32069,
+    8.5
+   ],
+   [
+    64067,
+    5.4
+   ]
+  ],
+  "needle_found": [
+   true,
+   true
+  ],
+  "source": "spill1-32000.jsonl, spill1-64000.jsonl",
+  "log": "server-spill1-32000.log, server-spill1-64000.log"
+ },
+ {
+  "machine": "gtx1650-i7-9750h",
+  "label": "spill 2",
+  "metric": "write_tps",
+  "points": [
+   [
+    64067,
+    3.1
+   ]
+  ],
+  "needle_found": [
+   true
+  ],
+  "source": "spill2-64000.jsonl",
+  "log": "server-spill2-64000.log"
+ },
+ {
+  "machine": "gtx1650-i7-9750h",
+  "label": "plain",
+  "metric": "read_tps",
+  "points": [
+   [
+    8068,
+    168.9
+   ],
+   [
+    32069,
+    122.8
+   ],
+   [
+    42076,
+    110.2
+   ]
+  ],
+  "needle_found": [
+   true,
+   true,
+   true
+  ],
+  "source": "plain-43008.jsonl",
+  "log": "server-plain-43008.log"
+ },
+ {
+  "machine": "gtx1650-i7-9750h",
+  "label": "stream",
+  "metric": "read_tps",
+  "points": [
+   [
+    8068,
+    169.1
+   ],
+   [
+    32069,
+    121.3
+   ],
+   [
+    64067,
+    88.0
+   ],
+   [
+    125068,
+    58.0
+   ]
+  ],
+  "needle_found": [
+   true,
+   true,
+   true,
+   true
+  ],
+  "source": "stream.jsonl",
+  "log": "server-stream.log"
+ },
+ {
+  "machine": "gtx1650-i7-9750h",
+  "label": "spill 1",
+  "metric": "read_tps",
+  "points": [
+   [
+    32069,
+    119.1
+   ],
+   [
+    64067,
+    87.1
+   ]
+  ],
+  "needle_found": [
+   true,
+   true
+  ],
+  "source": "spill1-32000.jsonl, spill1-64000.jsonl",
+  "log": "server-spill1-32000.log, server-spill1-64000.log"
+ },
+ {
+  "machine": "gtx1650-i7-9750h",
+  "label": "spill 2",
+  "metric": "read_tps",
+  "points": [
+   [
+    64067,
+    90.0
+   ]
+  ],
+  "needle_found": [
+   true
+  ],
+  "source": "spill2-64000.jsonl",
+  "log": "server-spill2-64000.log"
+ },
+ {
+  "machine": "gtx1650-i7-9750h",
+  "label": "split off (slot restored)",
+  "metric": "write_tps",
+  "points": [
+   [
+    64067,
+    14.0
+   ],
+   [
+    125068,
+    7.1
+   ]
+  ],
+  "needle_found": [
+   true,
+   true
+  ],
+  "source": "restore-64000.jsonl, restore-125000.jsonl",
+  "log": "server-restore-64000.log, server-restore-125000.log"
+ },
+ {
+  "machine": "gtx1650-i7-9750h",
+  "label": "split auto",
+  "metric": "write_tps",
+  "points": [
+   [
+    64067,
+    13.8
+   ],
+   [
+    125068,
+    8.3
+   ]
+  ],
+  "needle_found": [
+   true,
+   true
+  ],
+  "source": "split-auto-64000.jsonl, split-auto-125000.jsonl",
+  "log": "server-split-auto-64000.log, server-split-auto-125000.log"
+ },
+ {
+  "machine": "gtx1650-i7-9750h",
+  "label": "split ceiling (output wrong)",
+  "metric": "write_tps",
+  "points": [
+   [
+    64067,
+    14.3
+   ],
+   [
+    125068,
+    11.0
+   ]
+  ],
+  "needle_found": [
+   true,
+   true
+  ],
+  "source": "split-noop-64000.jsonl, split-noop-125000.jsonl",
+  "log": "server-split-noop-64000.log, server-split-noop-125000.log"
+ }
+]

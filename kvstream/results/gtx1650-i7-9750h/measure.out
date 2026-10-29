@@ -1,0 +1,212 @@
+[2026-10-29 18:11:45] plain: server did not start
+0.01.100.236 E cmn  common_init_: failed to create context with model '~/code/kv-stream-brick/models/Qwen3.5-4B-Q4_K_M.gguf'
+0.01.100.238 E srv    load_model: failed to create_context with model '~/code/kv-stream-brick/models/Qwen3.5-4B-Q4_K_M.gguf'
+0.01.100.918 E srv  llama_server: exiting due to model loading error
+[2026-10-29 18:11:47] plain up: 18:11:45,4,21.18,1875,47,0x0000000000000000,108,3545
+Traceback (most recent call last):
+  File "~/code/kv-stream-brick/probe/longctx.py", line 44, in <module>
+    d = post('/v1/chat/completions', {'model': 'x', 'temperature': 0, 'max_tokens': 400,
+                                      'chat_template_kwargs': {'enable_thinking': False},
+                                      'messages': [{'role': 'user', 'content': body + QUESTION}]})
+  File "~/code/kv-stream-brick/probe/longctx.py", line 17, in post
+    return json.load(urllib.request.urlopen(req, timeout=timeout))
+                     ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/urllib/request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/urllib/request.py", line 487, in open
+    response = self._open(req, data)
+  File "/usr/lib/python3.14/urllib/request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+                              '_open', req)
+  File "/usr/lib/python3.14/urllib/request.py", line 464, in _call_chain
+    result = func(*args)
+  File "/usr/lib/python3.14/urllib/request.py", line 1350, in http_open
+    return self.do_open(http.client.HTTPConnection, req)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/urllib/request.py", line 1325, in do_open
+    r = h.getresponse()
+  File "/usr/lib/python3.14/http/client.py", line 1459, in getresponse
+    response.begin()
+    ~~~~~~~~~~~~~~^^
+  File "/usr/lib/python3.14/http/client.py", line 336, in begin
+    version, status, reason = self._read_status()
+                              ~~~~~~~~~~~~~~~~~^^
+  File "/usr/lib/python3.14/http/client.py", line 305, in _read_status
+    raise RemoteDisconnected("Remote end closed connection without"
+                             " response")
+http.client.RemoteDisconnected: Remote end closed connection without response
+[2026-10-29 18:11:48] plain@8000: no answer (timeout 14400 s or error)
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/urllib/request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+              encode_chunked=req.has_header('Transfer-encoding'))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/http/client.py", line 1367, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/http/client.py", line 1413, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/http/client.py", line 1362, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/http/client.py", line 1122, in _send_output
+    self.send(msg)
+    ~~~~~~~~~^^^^^
+  File "/usr/lib/python3.14/http/client.py", line 1066, in send
+    self.connect()
+    ~~~~~~~~~~~~^^
+  File "/usr/lib/python3.14/http/client.py", line 1032, in connect
+    self.sock = self._create_connection(
+                ~~~~~~~~~~~~~~~~~~~~~~~^
+        (self.host,self.port), self.timeout, self.source_address)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/socket.py", line 870, in create_connection
+    raise exceptions[0]
+  File "/usr/lib/python3.14/socket.py", line 855, in create_connection
+    sock.connect(sa)
+    ~~~~~~~~~~~~^^^^
+ConnectionRefusedError: [Errno 111] Connection refused
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "~/code/kv-stream-brick/probe/longctx.py", line 36, in <module>
+    toks = post('/tokenize', {'content': body})['tokens']
+           ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "~/code/kv-stream-brick/probe/longctx.py", line 17, in post
+    return json.load(urllib.request.urlopen(req, timeout=timeout))
+                     ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/urllib/request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/urllib/request.py", line 487, in open
+    response = self._open(req, data)
+  File "/usr/lib/python3.14/urllib/request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+                              '_open', req)
+  File "/usr/lib/python3.14/urllib/request.py", line 464, in _call_chain
+    result = func(*args)
+  File "/usr/lib/python3.14/urllib/request.py", line 1350, in http_open
+    return self.do_open(http.client.HTTPConnection, req)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/urllib/request.py", line 1324, in do_open
+    raise URLError(err)
+urllib.error.URLError: <urlopen error [Errno 111] Connection refused>
+./measure.sh: line 15: 176492 Aborted                    (core dumped) "$BIN" "${COMMON[@]}" --ctx-size $ctx --slot-save-path $H/slots "$@" > $O/server-$NAME.log 2>&1
+[2026-10-29 18:11:48] plain@32000: no answer (timeout 14400 s or error)
+Traceback (most recent call last):
+  File "/usr/lib/python3.14/urllib/request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+              encode_chunked=req.has_header('Transfer-encoding'))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/http/client.py", line 1367, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/http/client.py", line 1413, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/http/client.py", line 1362, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/http/client.py", line 1122, in _send_output
+    self.send(msg)
+    ~~~~~~~~~^^^^^
+  File "/usr/lib/python3.14/http/client.py", line 1066, in send
+    self.connect()
+    ~~~~~~~~~~~~^^
+  File "/usr/lib/python3.14/http/client.py", line 1032, in connect
+    self.sock = self._create_connection(
+                ~~~~~~~~~~~~~~~~~~~~~~~^
+        (self.host,self.port), self.timeout, self.source_address)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/socket.py", line 870, in create_connection
+    raise exceptions[0]
+  File "/usr/lib/python3.14/socket.py", line 855, in create_connection
+    sock.connect(sa)
+    ~~~~~~~~~~~~^^^^
+ConnectionRefusedError: [Errno 111] Connection refused
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "~/code/kv-stream-brick/probe/longctx.py", line 36, in <module>
+    toks = post('/tokenize', {'content': body})['tokens']
+           ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "~/code/kv-stream-brick/probe/longctx.py", line 17, in post
+    return json.load(urllib.request.urlopen(req, timeout=timeout))
+                     ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/urllib/request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/urllib/request.py", line 487, in open
+    response = self._open(req, data)
+  File "/usr/lib/python3.14/urllib/request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+                              '_open', req)
+  File "/usr/lib/python3.14/urllib/request.py", line 464, in _call_chain
+    result = func(*args)
+  File "/usr/lib/python3.14/urllib/request.py", line 1350, in http_open
+    return self.do_open(http.client.HTTPConnection, req)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/urllib/request.py", line 1324, in do_open
+    raise URLError(err)
+urllib.error.URLError: <urlopen error [Errno 111] Connection refused>
+[2026-10-29 18:11:48] plain@44056: no answer (timeout 14400 s or error)
+./measure.sh: line 34: kill: (176492) - No such process
+[2026-10-29 18:11:55] stream up: 18:11:53,3634,27.40,1875,50,0x0000000000000000,5453,6133
+{"label": "stream@8000", "prompt_tokens": 8068, "wall_s": 53.7, "prefill_tps": 169.1, "decode_tps": 25.5, "draft": "None/None", "needle_found": true}
+{"label": "stream@32000", "prompt_tokens": 32069, "wall_s": 273.4, "prefill_tps": 121.3, "decode_tps": 19.0, "draft": "None/None", "needle_found": true}
+{"label": "stream@64000", "prompt_tokens": 64067, "wall_s": 741.5, "prefill_tps": 88.0, "decode_tps": 13.9, "draft": "None/None", "needle_found": true}
+[2026-10-29 18:29:49] saved: {"id_slot":0,"filename":"probe-64000.bin","n_saved":64234,"n_written":1278058996,"timings":{"save_ms":3882.793}}
+{"label": "stream@125000", "prompt_tokens": 125068, "wall_s": 2186.5, "prefill_tps": 58.0, "decode_tps": 7.0, "draft": "None/None", "needle_found": true}
+[2026-10-29 19:06:25] saved: {"id_slot":0,"filename":"probe-125000.bin","n_saved":125272,"n_written":2342317564,"timings":{"save_ms":8853.234}}
+[2026-10-29 19:06:33] split-auto-64000 up: 19:06:31,2670,23.39,1845,62,0x0000000000000000,3112,5940
+[2026-10-29 19:06:34] restored: {"id_slot":0,"filename":"probe-64000.bin","n_restored":64234,"n_read":1278058996,"timings":{"restore_ms":1034.434}}
+{"label": "split-auto@64000", "prompt_tokens": 64067, "wall_s": 11.9, "prefill_tps": 12.1, "decode_tps": 13.8, "draft": "None/None", "needle_found": true}
+[2026-10-29 19:06:54] split-auto-125000 up: 19:06:52,2670,23.41,1845,62,0x0000000000000000,3067,5953
+[2026-10-29 19:06:55] restored: {"id_slot":0,"filename":"probe-125000.bin","n_restored":125272,"n_read":2342317564,"timings":{"restore_ms":884.378}}
+{"label": "split-auto@125000", "prompt_tokens": 125068, "wall_s": 18.1, "prefill_tps": 8.1, "decode_tps": 8.3, "draft": "None/None", "needle_found": true}
+[2026-10-29 19:07:21] split-noop-64000 up: 19:07:19,2670,23.85,1845,64,0x0000000000000000,3067,6081
+[2026-10-29 19:07:21] restored: {"id_slot":0,"filename":"probe-64000.bin","n_restored":64234,"n_read":1278058996,"timings":{"restore_ms":346.561}}
+{"label": "split-noop@64000", "prompt_tokens": 64067, "wall_s": 11.7, "prefill_tps": 12.2, "decode_tps": 14.3, "draft": "None/None", "needle_found": true}
+[2026-10-29 19:07:41] split-noop-125000 up: 19:07:39,3008,23.60,1845,63,0x0000000000000000,3167,6285
+[2026-10-29 19:07:42] restored: {"id_slot":0,"filename":"probe-125000.bin","n_restored":125272,"n_read":2342317564,"timings":{"restore_ms":571.599}}
+{"label": "split-noop@125000", "prompt_tokens": 125068, "wall_s": 15.3, "prefill_tps": 8.0, "decode_tps": 11.0, "draft": "None/None", "needle_found": true}
+[2026-10-29 19:08:07] spill2 up: 19:08:06,3712,32.29,1845,65,0x0000000000000000,1047,8219
+Traceback (most recent call last):
+  File "~/code/kv-stream-brick/probe/longctx.py", line 44, in <module>
+    d = post('/v1/chat/completions', {'model': 'x', 'temperature': 0, 'max_tokens': 400,
+                                      'chat_template_kwargs': {'enable_thinking': False},
+                                      'messages': [{'role': 'user', 'content': body + QUESTION}]})
+  File "~/code/kv-stream-brick/probe/longctx.py", line 17, in post
+    return json.load(urllib.request.urlopen(req, timeout=timeout))
+                     ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/urllib/request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/urllib/request.py", line 487, in open
+    response = self._open(req, data)
+  File "/usr/lib/python3.14/urllib/request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+                              '_open', req)
+  File "/usr/lib/python3.14/urllib/request.py", line 464, in _call_chain
+    result = func(*args)
+  File "/usr/lib/python3.14/urllib/request.py", line 1350, in http_open
+    return self.do_open(http.client.HTTPConnection, req)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/urllib/request.py", line 1325, in do_open
+    r = h.getresponse()
+  File "/usr/lib/python3.14/http/client.py", line 1459, in getresponse
+    response.begin()
+    ~~~~~~~~~~~~~~^^
+  File "/usr/lib/python3.14/http/client.py", line 336, in begin
+    version, status, reason = self._read_status()
+                              ~~~~~~~~~~~~~~~~~^^
+  File "/usr/lib/python3.14/http/client.py", line 305, in _read_status
+    raise RemoteDisconnected("Remote end closed connection without"
+                             " response")
+http.client.RemoteDisconnected: Remote end closed connection without response

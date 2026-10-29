@@ -1,0 +1,702 @@
+From 32f07399267bf46e83eec11dc0609e6c968e5fe5 Mon Sep 17 00:00:00 2001
+From: David <david@katalystnord.com>
+Date: Thu, 29 Oct 2026 18:59:44 +0100
+Subject: [PATCH 6/6] tests, scripts: test-fa-lse and brick's measurement
+ scripts
+
+test-fa-lse (from beast): CPU attention over two parts of K/V merged by their
+LSE equals attention over all of it. scripts/kv-stream-brick: the build, the
+split smoke test and sweep, the release measurement set with beast's probe, and
+the standalone CPU attention benchmark.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ scripts/kv-stream-brick/README.md        |  20 ++
+ scripts/kv-stream-brick/build.sh         |   8 +
+ scripts/kv-stream-brick/fa-cpu.cpp       |  60 ++++++
+ scripts/kv-stream-brick/longctx.py       |  68 ++++++
+ scripts/kv-stream-brick/measure.sh       |  73 +++++++
+ scripts/kv-stream-brick/probe-longctx.py |  56 +++++
+ scripts/kv-stream-brick/split-smoke.sh   |  14 ++
+ scripts/kv-stream-brick/split-sweep.sh   |  40 ++++
+ tests/CMakeLists.txt                     |   1 +
+ tests/test-fa-lse.cpp                    | 260 +++++++++++++++++++++++
+ 10 files changed, 600 insertions(+)
+ create mode 100644 scripts/kv-stream-brick/README.md
+ create mode 100755 scripts/kv-stream-brick/build.sh
+ create mode 100644 scripts/kv-stream-brick/fa-cpu.cpp
+ create mode 100644 scripts/kv-stream-brick/longctx.py
+ create mode 100755 scripts/kv-stream-brick/measure.sh
+ create mode 100644 scripts/kv-stream-brick/probe-longctx.py
+ create mode 100755 scripts/kv-stream-brick/split-smoke.sh
+ create mode 100755 scripts/kv-stream-brick/split-sweep.sh
+ create mode 100644 tests/test-fa-lse.cpp
+
+diff --git a/scripts/kv-stream-brick/README.md b/scripts/kv-stream-brick/README.md
+new file mode 100644
+index 000000000..7fd661320
+--- /dev/null
++++ b/scripts/kv-stream-brick/README.md
+@@ -0,0 +1,20 @@
++# kv-stream-brick scripts
++
++Scripts behind brick's measurements (GTX 1650 Max-Q 4 GB, i7-9750H, Qwen3.5 4B Q4_K_M). They expect a work folder
++($KV_STREAM_BRICK, default ~/code/kv-stream-brick) holding this clone as llama.cpp-adaptive-kv-streaming (built in
++build-sm75 by build.sh), the model in models/, and runs/, slots/ and results/ for output.
++
++- build.sh: the sm_75 build (configure with -DGGML_CUDA_KV_STREAM_D512=OFF).
++- longctx.py: exact-length prompts from the fork's .md files (split sweeps).
++- split-smoke.sh: one server run with or without LLAMA_KV_SPLIT; LLAMA_KV_SPLIT_VERIFY=1 compares every decode layer
++  with CPU attention over the whole context.
++- split-sweep.sh: reads a prompt once, saves the slot, then restores it for each split setting.
++- measure.sh: the release set (plain, spill 1, spill 2, stream, split, stream at 250K). It runs probe-longctx.py,
++  copied to $KV_STREAM_BRICK/probe/longctx.py, with PROBE_SRC pointing at a `git archive` of this fork's src, common
++  and tools/server at bcf1a81d6.
++- fa-cpu.cpp: standalone CPU flash attention benchmark in the split's shape. Build:
++  g++ -O2 -std=c++17 -Iggml/include -Iggml/src fa-cpu.cpp -Lbuild-sm75/bin -lggml -lggml-base -lggml-cpu
++
++Split attention environment: LLAMA_KV_SPLIT=auto or a fraction in (0, 1); LLAMA_KV_SPLIT_THREADS (default two thirds
++of the hardware threads); LLAMA_KV_SPLIT_DEBUG; LLAMA_KV_SPLIT_VERIFY; LLAMA_KV_SPLIT_NOOP (measuring only, output
++wrong).
+diff --git a/scripts/kv-stream-brick/build.sh b/scripts/kv-stream-brick/build.sh
+new file mode 100755
+index 000000000..24b0d6d36
+--- /dev/null
++++ b/scripts/kv-stream-brick/build.sh
+@@ -0,0 +1,8 @@
++#!/bin/bash
++# Build for brick (sm_75). Configured with -DGGML_CUDA_KV_STREAM_D512=OFF (local patch): the six head-512
++# kv-stream-mma-runtime units need more than 24 GB of RAM each in cicc and are only used by Gemma 4.
++set -e
++B=${KV_STREAM_BRICK:-$HOME/code/kv-stream-brick}/llama.cpp-adaptive-kv-streaming/build-sm75
++echo "== $(date +%T) build, 3 jobs"
++cmake --build "$B" --target llama-server llama-bench test-cuda-compiled-features test-kv-stream-model --parallel 3
++echo "== $(date +%T) BUILD OK"
+diff --git a/scripts/kv-stream-brick/fa-cpu.cpp b/scripts/kv-stream-brick/fa-cpu.cpp
+new file mode 100644
+index 000000000..2675202c8
+--- /dev/null
++++ b/scripts/kv-stream-brick/fa-cpu.cpp
+@@ -0,0 +1,60 @@
++// Time ggml CPU flash attention in the split's shape: one query row, 16 heads over 4 KV heads of 256,
++// q8_0 K and q4_0 V in token-major rows (the host store layout), with a zero mask and the LSE output.
++#include "ggml.h"
++#include "ggml-cpu.h"
++#include "ggml-fa-lse.h"
++#include <chrono>
++#include <cstdio>
++#include <cstdlib>
++#include <vector>
++
++int main(int argc, char ** argv) {
++    const int64_t tokens = argc > 1 ? atoll(argv[1]) : 512;
++    const int threads = argc > 2 ? atoi(argv[2]) : 4;
++    const int reps = argc > 3 ? atoi(argv[3]) : 20;
++    const int64_t D = 256, H = 16, KVH = 4;
++    const size_t krow = ggml_row_size(GGML_TYPE_Q8_0, D), vrow = ggml_row_size(GGML_TYPE_Q4_0, D);
++    std::vector<uint8_t> K(tokens*KVH*krow), V(tokens*KVH*vrow);
++    for (auto & b : K) b = rand(); for (auto & b : V) b = rand();
++    // keep the q8_0/q4_0 scales finite: set every block's f16 scale to 0.01
++    const ggml_fp16_t sc = ggml_fp32_to_fp16(0.01f);
++    for (size_t i = 0; i < K.size(); i += 34) memcpy(&K[i], &sc, 2);
++    for (size_t i = 0; i < V.size(); i += 18) memcpy(&V[i], &sc, 2);
++    std::vector<float> Q(H*D), out(H*D), lse(H);
++    for (auto & x : Q) x = (rand()/(float)RAND_MAX - 0.5f);
++    std::vector<ggml_fp16_t> M(tokens, ggml_fp32_to_fp16(0.0f));
++    ggml_threadpool_params tpp = ggml_threadpool_params_default(threads);
++    ggml_threadpool * pool = ggml_threadpool_new(&tpp);
++    std::vector<uint8_t> work;
++    double best = 1e9, total = 0;
++    for (int r = 0; r < reps; ++r) {
++        auto t0 = std::chrono::steady_clock::now();
++        ggml_init_params ip = {16*ggml_tensor_overhead() + ggml_graph_overhead_custom(8,false), nullptr, true};
++        ggml_context * ctx = ggml_init(ip);
++        ggml_tensor * q = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, D, 1, H); q->data = Q.data();
++        ggml_tensor * k = ggml_new_tensor_3d(ctx, GGML_TYPE_Q8_0, D, tokens, KVH);
++        k->nb[1] = KVH*krow; k->nb[2] = krow; k->nb[3] = KVH*krow*tokens; k->data = K.data();
++        ggml_tensor * v = ggml_new_tensor_3d(ctx, GGML_TYPE_Q4_0, D, tokens, KVH);
++        v->nb[1] = KVH*vrow; v->nb[2] = vrow; v->nb[3] = KVH*vrow*tokens; v->data = V.data();
++        ggml_tensor * m = ggml_new_tensor_2d(ctx, GGML_TYPE_F16, tokens, 1); m->data = M.data();
++        ggml_tensor * fa = ggml_flash_attn_ext(ctx, q, k, v, m, 0.0625f, 0, 0);
++        fa->data = out.data();
++        ggml_flash_attn_ext_set_lse(fa, lse.data());
++        ggml_cgraph * g = ggml_new_graph_custom(ctx, 8, false);
++        ggml_build_forward_expand(g, fa);
++        ggml_cplan plan = ggml_graph_plan(g, threads, pool);
++        if (plan.work_size > work.size()) work.resize(plan.work_size);
++        plan.work_data = work.data();
++        auto t1 = std::chrono::steady_clock::now();
++        ggml_graph_compute(g, &plan);
++        auto t2 = std::chrono::steady_clock::now();
++        ggml_free(ctx);
++        const double ms = std::chrono::duration<double, std::milli>(t2-t0).count();
++        if (r == 0) printf("first call %.3f ms (setup %.3f ms), work %zu bytes\n", ms, std::chrono::duration<double, std::milli>(t1-t0).count(), plan.work_size);
++        else { best = std::min(best, ms); total += ms; }
++    }
++    const double bytes = double(tokens)*KVH*(krow+vrow);
++    printf("tokens %lld threads %d: best %.3f ms, mean %.3f ms, %.2f GB/s (best), lse[0] %g out[0] %g\n", (long long)tokens, threads,
++        best, total/(reps-1), bytes/(best*1e-3)/1e9, lse[0], out[0]);
++    ggml_threadpool_free(pool);
++}
+diff --git a/scripts/kv-stream-brick/longctx.py b/scripts/kv-stream-brick/longctx.py
+new file mode 100644
+index 000000000..8027378ee
+--- /dev/null
++++ b/scripts/kv-stream-brick/longctx.py
+@@ -0,0 +1,68 @@
++#!/usr/bin/env python3
++"""Long-context runs against a running llama-server: exact-length token prompts, greedy, one JSON line per run.
++
++usage: [CACHE=1] [N_PREDICT=64] longctx.py PORT LABEL OUT.jsonl N [N ...]
++CACHE=1 reuses the server's cached prompt (after a slot restore only the tail is computed).
++Corpus: all .md files of the fork (sorted), tokenized once by the server and cached in runs/corpus-tokens.json.
++"""
++import json, os, subprocess, sys, time, urllib.request
++
++HERE = os.path.dirname(os.path.abspath(__file__))
++REPO = os.path.join(HERE, "llama.cpp-adaptive-kv-streaming")
++CACHE = os.path.join(HERE, "runs", "corpus-tokens.json")
++TAIL = "\n\nQuestion: in one sentence, what is the text above about?\nAnswer:"
++
++
++def post(port, path, body, timeout=7200):
++    req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", data=json.dumps(body).encode(),
++                                 headers={"Content-Type": "application/json"})
++    with urllib.request.urlopen(req, timeout=timeout) as r:
++        return json.load(r)
++
++
++def corpus_tokens(port):
++    if os.path.exists(CACHE):
++        return json.load(open(CACHE))
++    files = sorted(os.path.join(d, f) for d, _, fs in os.walk(REPO) if "/build" not in d and "/.git" not in d
++                   for f in fs if f.endswith(".md"))
++    text = "\n\n".join(open(f, errors="replace").read() for f in files)
++    toks = post(port, "/tokenize", {"content": text})["tokens"]
++    json.dump(toks, open(CACHE, "w"))
++    return toks
++
++
++def gpu():
++    q = "memory.used,clocks.sm,power.draw,pcie.link.gen.current,temperature.gpu"
++    return subprocess.run(["nvidia-smi", f"--query-gpu={q}", "--format=csv,noheader"],
++                          capture_output=True, text=True).stdout.strip()
++
++
++def main():
++    port, label, out = sys.argv[1], sys.argv[2], sys.argv[3]
++    lengths = [int(n) for n in sys.argv[4:]]
++    toks = corpus_tokens(port)
++    tail = post(port, "/tokenize", {"content": TAIL})["tokens"]
++    for n in lengths:
++        prompt = toks[: n - len(tail)] + tail
++        t0 = time.time()
++        rec = {"label": label, "prompt_tokens_requested": n, "start": time.strftime("%H:%M:%S")}
++        try:
++            d = post(port, "/completion", {"prompt": prompt, "n_predict": int(os.environ.get("N_PREDICT", 64)),
++                                           "temperature": 0, "cache_prompt": bool(os.environ.get("CACHE"))})
++            t = d["timings"]
++            rec.update(prompt_n=t["prompt_n"], prefill_tps=round(t["prompt_per_second"], 2),
++                       gen_n=t["predicted_n"], decode_tps=round(t["predicted_per_second"], 2),
++                       text=d["content"])
++        except Exception as e:
++            rec["error"] = repr(e)
++        rec["wall_s"] = round(time.time() - t0, 1)
++        rec["gpu_after"] = gpu()
++        print(json.dumps(rec), flush=True)
++        with open(out, "a") as f:
++            f.write(json.dumps(rec) + "\n")
++        if "error" in rec:
++            break
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/scripts/kv-stream-brick/measure.sh b/scripts/kv-stream-brick/measure.sh
+new file mode 100755
+index 000000000..d7dbcf363
+--- /dev/null
++++ b/scripts/kv-stream-brick/measure.sh
+@@ -0,0 +1,73 @@
++#!/bin/bash
++# The release measurement set (MEASURE-LIKE-BEAST.md) on brick: Qwen3.5 4B Q4_K_M, q8_0 K and V, greedy, no drafting
++# (no MTP head), batch and ubatch 256 everywhere. Probe: probe/longctx.py (beast's, prompt text from the fork at
++# bcf1a81d6 in probe/src-bcf1a81d6). Each run logs the server, the probe JSON, the answers, and a sample every 2 s of
++# GPU memory, power, SM clock, temperature, throttle reasons and the server's RSS.
++# usage: measure.sh RUN...   RUN: plain spill1 spill2 stream split stream250
++H=${KV_STREAM_BRICK:-$HOME/code/kv-stream-brick}
++O=$H/results/gtx1650-i7-9750h; mkdir -p $O/answers $H/slots
++BIN=$H/llama.cpp-adaptive-kv-streaming/build-sm75/bin/llama-server
++COMMON=(-m $H/models/Qwen3.5-4B-Q4_K_M.gguf --parallel 1 --n-gpu-layers 999 --flash-attn on --fit off
++        --cache-type-k q8_0 --cache-type-v q8_0 --no-mmproj --spec-type none -b 256 -ub 256 --port 8099)
++STREAM=(--shared-device-memory-mib 896)
++export PROBE_SRC=$H/probe/src-bcf1a81d6 ANSWER_DIR=$O/answers
++say() { echo "[$(date +%F\ %T)] $*"; }
++post() { curl -s -m 1200 -H 'Content-Type: application/json' -d "$2" "http://127.0.0.1:8099$1"; }
++
++start() {  # name ctx [args...]: env for the server comes from the caller
++  NAME=$1; local ctx=$2; shift 2
++  "$BIN" "${COMMON[@]}" --ctx-size $ctx --slot-save-path $H/slots "$@" > $O/server-$NAME.log 2>&1 &
++  PID=$!
++  ( echo "time,gpu_mem_mib,power_w,sm_mhz,temp_c,throttle,server_rss_mib,ram_used_mib"
++    while kill -0 $PID 2>/dev/null; do
++      g=$(nvidia-smi --query-gpu=memory.used,power.draw,clocks.sm,temperature.gpu,clocks_throttle_reasons.active \
++          --format=csv,noheader,nounits | tr -d ' ')
++      r=$(( $(ps -o rss= -p $PID 2>/dev/null || echo 0) / 1024 ))
++      echo "$(date +%T),$g,$r,$(free -m | awk '/^Mem:/{print $3}')"; sleep 2
++    done ) > $O/samples-$NAME.csv &
++  for i in $(seq 300); do
++    curl -s -m2 localhost:8099/health | grep -q ok && { say "$NAME up: $(tail -1 $O/samples-$NAME.csv)"; return 0; }
++    kill -0 $PID 2>/dev/null || break; sleep 2
++  done
++  say "$NAME: server did not start"; grep -E ' E ' $O/server-$NAME.log | tail -3; kill $PID 2>/dev/null; wait $PID 2>/dev/null; return 1
++}
++stop() { kill $PID; wait $PID 2>/dev/null; sleep 3; }
++probe() {  # depth label [timeout_s]
++  timeout ${3:-14400} python3 -I -u $H/probe/longctx.py 8099 $1 $2 >> $O/$NAME.jsonl || say "$2: no answer (timeout ${3:-14400} s or error)"
++  tail -1 $O/$NAME.jsonl | sed -E 's/, "answer_start".*/}/'
++}
++
++for RUN in "$@"; do case $RUN in
++plain)   # stock attention, whole cache on the GPU, the largest window that loads with q8_0 V
++  for ctx in 49152 45056 40960; do start plain $ctx && break; done || continue
++  for d in 8000 32000 $((ctx-1000)); do probe $d plain@$d; done; stop ;;
++spill1)  # cache in RAM, attention on the CPU
++  start spill1 131072 --no-kv-offload || continue
++  for d in 32000 64000 125000; do probe $d nkvo@$d 7200; done; stop ;;
++spill2)  # no stream, the driver pages GPU memory to RAM; 30 minutes per request
++  export GGML_CUDA_ENABLE_UNIFIED_MEMORY=1; start spill2 131072; ok=$?; unset GGML_CUDA_ENABLE_UNIFIED_MEMORY
++  [ $ok = 0 ] || continue
++  for d in 64000 125000; do probe $d unified@$d 1800; done; stop ;;
++stream)  # the fork's streaming; saves the 64K and 125K slots for the split runs
++  start stream 131072 "${STREAM[@]}" || continue
++  for d in 8000 32000 64000 125000; do
++    probe $d stream@$d
++    case $d in 64000|125000) say "saved: $(post '/slots/0?action=save' "{\"filename\": \"probe-$d.bin\"}" | cut -c1-120)";; esac
++  done; stop ;;
++split)   # no split (the stream run), auto, and the ceiling (CPU part skipped, output wrong); slot restored, prompt reused
++  for mode in auto noop; do for d in 64000 125000; do
++    [ -s $H/slots/probe-$d.bin ] || { say "no slot for $d: run stream first"; continue; }
++    unset LLAMA_KV_SPLIT_NOOP
++    if [ $mode = noop ]; then export LLAMA_KV_SPLIT=0.5 LLAMA_KV_SPLIT_NOOP=1; else export LLAMA_KV_SPLIT=auto; fi
++    export LLAMA_KV_SPLIT_THREADS=6 LLAMA_KV_SPLIT_DEBUG=1
++    start split-$mode-$d 131072 "${STREAM[@]}"; ok=$?
++    unset LLAMA_KV_SPLIT LLAMA_KV_SPLIT_NOOP LLAMA_KV_SPLIT_THREADS LLAMA_KV_SPLIT_DEBUG
++    [ $ok = 0 ] || continue
++    say "restored: $(post '/slots/0?action=restore' "{\"filename\": \"probe-$d.bin\"}" | cut -c1-120)"
++    probe $d split-$mode@$d; stop
++  done; done ;;
++stream250)  # the deepest: 250K in a 262,144 window
++  start stream250 262144 "${STREAM[@]}" || continue
++  probe 250000 stream@250000; stop ;;
++esac; done
++say "MEASURE DONE: $*"
+diff --git a/scripts/kv-stream-brick/probe-longctx.py b/scripts/kv-stream-brick/probe-longctx.py
+new file mode 100644
+index 000000000..7d1b4053e
+--- /dev/null
++++ b/scripts/kv-stream-brick/probe-longctx.py
+@@ -0,0 +1,56 @@
++#!/usr/bin/env python3
++"""Long-context probe for the kv-stream fork (2026-10-28). Builds a prompt of about N tokens from llama.cpp's own source
++files (public text), hides a code word at 10% depth, asks for it at the end plus a short task, and prints the server's
++prefill and decode speed and whether the code word came back. Usage: longctx.py <port> <target_tokens> [label]"""
++import glob, json, os, sys, time, urllib.request
++
++PORT, TARGET = int(sys.argv[1]), int(sys.argv[2])
++LABEL = sys.argv[3] if len(sys.argv) > 3 else ''
++URL = 'http://127.0.0.1:%d' % PORT
++NEEDLE = 'Note for the reader: the code word for the beast test is MARMALADE-7.'
++QUESTION = ('\n\nQuestion 1: what is the code word for the beast test, exactly as written above? '
++            'Question 2: in about 150 words, what does the file llama-context.cpp above do? Answer both briefly.')
++
++
++def post(path, body, timeout=3600):
++    req = urllib.request.Request(URL + path, json.dumps(body).encode(), {'Content-Type': 'application/json'})
++    return json.load(urllib.request.urlopen(req, timeout=timeout))
++
++
++def ntok(text):
++    return len(post('/tokenize', {'content': text})['tokens'])
++
++
++src = os.environ.get('PROBE_SRC') or os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # repo root
++files = sorted(glob.glob(src + '/src/*.cpp') + glob.glob(src + '/common/*.cpp') + glob.glob(src + '/tools/server/*.cpp'))
++first = [f for f in files if f.endswith('src/llama-context.cpp')]
++files = first + [f for f in files if f not in first]
++parts, total = [], 0
++for f in files:
++    text = '\n// ===== file %s =====\n' % os.path.relpath(f, src) + open(f, errors='replace').read()
++    parts.append(text)
++    total += len(text)
++    if total > TARGET * 4.2:  # code is about 3 to 4 characters per token; trimmed exactly below
++        break
++body = ''.join(parts)
++toks = post('/tokenize', {'content': body})['tokens']
++if len(toks) > TARGET:
++    body = post('/detokenize', {'tokens': toks[:TARGET]})['content']
++cut = len(body) // 10
++body = body[:cut] + '\n\n' + NEEDLE + '\n\n' + body[cut:]
++prompt_tokens = ntok(body + QUESTION)
++
++t = time.time()
++d = post('/v1/chat/completions', {'model': 'x', 'temperature': 0, 'max_tokens': 400,
++                                  'chat_template_kwargs': {'enable_thinking': False},
++                                  'messages': [{'role': 'user', 'content': body + QUESTION}]})
++wall = time.time() - t
++ans = d['choices'][0]['message'].get('content') or ''
++tm = d.get('timings', {})
++if os.environ.get('ANSWER_DIR'):  # the whole answer, to compare runs word for word
++    with open(os.path.join(os.environ['ANSWER_DIR'], (LABEL or 'answer') + '.txt'), 'w') as f:
++        f.write(ans)
++print(json.dumps({'label': LABEL, 'prompt_tokens': prompt_tokens, 'wall_s': round(wall, 1),
++                  'prefill_tps': round(tm.get('prompt_per_second', 0), 1), 'decode_tps': round(tm.get('predicted_per_second', 0), 1),
++                  'draft': '%s/%s' % (tm.get('draft_n_accepted'), tm.get('draft_n')),
++                  'needle_found': 'MARMALADE-7' in ans, 'answer_start': ans[:300]}, ensure_ascii=False))
+diff --git a/scripts/kv-stream-brick/split-smoke.sh b/scripts/kv-stream-brick/split-smoke.sh
+new file mode 100755
+index 000000000..422df8a7f
+--- /dev/null
++++ b/scripts/kv-stream-brick/split-smoke.sh
+@@ -0,0 +1,14 @@
++#!/bin/bash
++# Split attention smoke test: same prompt with and without LLAMA_KV_SPLIT, greedy; compare answers.
++# usage: [LLAMA_KV_SPLIT_VERIFY=1] split-smoke.sh CTX ARENA_MIB PROMPT_TOKENS LABEL [FRAC|off] [THREADS]
++H=${KV_STREAM_BRICK:-$HOME/code/kv-stream-brick}
++CTX=$1 ARENA=$2 N=$3 LABEL=$4 FRAC=${5:-off} THREADS=${6:-8}
++if [ "$FRAC" != off ]; then export LLAMA_KV_SPLIT=$FRAC LLAMA_KV_SPLIT_THREADS=$THREADS LLAMA_KV_SPLIT_DEBUG=1; fi
++$H/llama.cpp-adaptive-kv-streaming/build-sm75/bin/llama-server -m $H/models/Qwen3.5-4B-Q4_K_M.gguf \
++  --ctx-size $CTX --parallel 1 --n-gpu-layers 999 --flash-attn on --fit off --cache-type-k q8_0 --cache-type-v q4_0 \
++  --no-mmproj -b 256 -ub 256 --shared-device-memory-mib $ARENA --port 8098 > $H/runs/split-$LABEL.log 2>&1 &
++PID=$!
++for i in $(seq 120); do curl -s -m2 localhost:8098/health | grep -q ok && break; kill -0 $PID 2>/dev/null || { echo "server died"; tail -5 $H/runs/split-$LABEL.log; exit 1; }; sleep 2; done
++python3 -I -u $H/longctx.py 8098 $LABEL $H/runs/split.jsonl $N
++kill $PID; wait $PID 2>/dev/null
++grep -E 'split attention|split:|split verify' $H/runs/split-$LABEL.log | tail -4
+diff --git a/scripts/kv-stream-brick/split-sweep.sh b/scripts/kv-stream-brick/split-sweep.sh
+new file mode 100755
+index 000000000..f6e524546
+--- /dev/null
++++ b/scripts/kv-stream-brick/split-sweep.sh
+@@ -0,0 +1,40 @@
++#!/bin/bash
++# Split attention sweep: the prompt at DEPTH is read once and the slot saved; each setting restarts the server,
++# restores the slot and writes N_PREDICT tokens greedily (only the tail is recomputed).
++# Settings "fraction:threads": "none:0" = split code off (stock write-combined host store),
++# "0:0" = split off with the cached host store (control), "0.3:6" = CPU share 0.3 with 6 threads.
++# usage: split-sweep.sh CTX ARENA_MIB DEPTH "SETTINGS..." [TAG]     results: runs/split.jsonl, logs runs/sweep-*.log
++H=${KV_STREAM_BRICK:-$HOME/code/kv-stream-brick}
++CTX=$1 ARENA=$2 DEPTH=$3 SETTINGS=$4 TAG=${5:-sweep}
++SLOTS=$H/slots; mkdir -p $SLOTS; FILE=fill-$CTX-$ARENA-$DEPTH.bin
++say() { echo "[$(date +%T)] $*"; }
++start() {  # label fraction threads [extra args]
++  local label=$1 frac=$2 threads=$3; shift 3
++  unset LLAMA_KV_SPLIT LLAMA_KV_SPLIT_THREADS LLAMA_KV_SPLIT_DEBUG
++  if [ "$frac" != none ]; then export LLAMA_KV_SPLIT=$frac LLAMA_KV_SPLIT_THREADS=$threads LLAMA_KV_SPLIT_DEBUG=1; fi
++  $H/llama.cpp-adaptive-kv-streaming/build-sm75/bin/llama-server -m $H/models/Qwen3.5-4B-Q4_K_M.gguf \
++    --ctx-size $CTX --parallel 1 --n-gpu-layers 999 --flash-attn on --fit off --cache-type-k q8_0 --cache-type-v q4_0 \
++    --no-mmproj -b 256 -ub 256 --shared-device-memory-mib $ARENA --port 8098 --slot-save-path $SLOTS "$@" \
++    > $H/runs/$TAG-$label.log 2>&1 &
++  PID=$!
++  for i in $(seq 150); do curl -s -m2 localhost:8098/health | grep -q ok && return 0; kill -0 $PID 2>/dev/null || break; sleep 2; done
++  say "$label: server did not start"; tail -3 $H/runs/$TAG-$label.log; return 1
++}
++stop() { kill $PID; wait $PID 2>/dev/null; sleep 2; }
++post() { curl -s -m 1200 -H 'Content-Type: application/json' -d "$2" "http://127.0.0.1:8098$1"; }
++
++if [ ! -s $SLOTS/$FILE ]; then
++  start fill none 0 || exit 1
++  CACHE=1 N_PREDICT=64 python3 -I -u $H/longctx.py 8098 $TAG-fill-$DEPTH $H/runs/split.jsonl $DEPTH | cut -c1-220
++  say "saved: $(post '/slots/0?action=save' "{\"filename\": \"$FILE\"}" | cut -c1-200)"
++  stop
++fi
++for c in $SETTINGS; do
++  f=${c%%:*}; t=${c##*:}; label=f$f-t$t-$DEPTH
++  start $label $f $t || continue
++  say "$label: restored: $(post '/slots/0?action=restore' "{\"filename\": \"$FILE\"}" | cut -c1-160)"
++  CACHE=1 N_PREDICT=${N_PREDICT:-64} python3 -I -u $H/longctx.py 8098 $TAG-$label $H/runs/split.jsonl $DEPTH | cut -c1-260
++  grep -E 'split verify|W split:' $H/runs/$TAG-$label.log | tail -2 | cut -c1-260
++  stop
++done
++say "SWEEP DONE"
+diff --git a/tests/CMakeLists.txt b/tests/CMakeLists.txt
+index ec6725c27..c7cb38f24 100644
+--- a/tests/CMakeLists.txt
++++ b/tests/CMakeLists.txt
+@@ -480,6 +480,7 @@ if (NOT GGML_BACKEND_DL AND GGML_CPU)
+     llama_build_and_test(test-quantize-perf.cpp)
+     llama_build_and_test(test-rope.cpp)
+     llama_build_and_test(test-col2im-1d.cpp)
++    llama_build_and_test(test-fa-lse.cpp)
+ endif()
+ 
+ # libmtmd
+diff --git a/tests/test-fa-lse.cpp b/tests/test-fa-lse.cpp
+new file mode 100644
+index 000000000..20b83b626
+--- /dev/null
++++ b/tests/test-fa-lse.cpp
+@@ -0,0 +1,260 @@
++// test-fa-lse.cpp: validate the optional log-sum-exp output of the CPU flash attention kernels
++// (op_params[GGML_FA_PARAM_LSE]), which lets attention over disjoint parts of K/V be merged exactly.
++//
++// test-backend-ops uses the CPU backend as its reference, so it cannot check the CPU kernels against themselves. This
++// test checks the property the split relies on, for every CPU path (one row with q8_0 and f16 K/V, which take the
++// per-head and the split-KV paths, several rows, which take the tiled and the chunked paths, 1 and 12 threads):
++//   1. attention over K/V[0, n1) and K/V[n1, n), merged by their LSE, equals attention over K/V[0, n): output and LSE;
++//   2. the LSE equals log(sum(exp(scale * q.k + mask))) computed in double precision from the same (f16) inputs;
++//   3. a row whose part is fully masked gets -inf and weight 0 in the merge.
++// With an f16 V cache the kernel accumulates the output in f16 (VKQ16), so the full run and the merged parts round
++// differently by about 1e-3; there the merge must add no error beyond the kernel's own: both are compared with a
++// double-precision output, and the merged error may be at most twice the full run's.
++
++#include "ggml.h"
++#include "ggml-cpu.h"
++#include "../ggml/src/ggml-fa-lse.h"
++
++#include <cmath>
++#include <cstdint>
++#include <cstdio>
++#include <cstring>
++#include <vector>
++
++// Deterministic LCG mapped to [-1, 1]
++static uint64_t g_rng = 0x2468ace0ULL;
++static float frand(void) {
++    g_rng = g_rng * 6364136223846793005ULL + 1442695040888963407ULL;
++    return (float)((g_rng >> 33) & 0xffffff) / (float)0x800000 - 1.0f;
++}
++
++struct fa_case {
++    const char * name;
++    ggml_type    type_kv;
++    int64_t      D;
++    int64_t      n_head_kv;
++    int64_t      gqa;
++    int64_t      n_rows;
++    int64_t      n_kv;
++    int64_t      n1;          // split point
++    bool         masked_rows; // row r sees only K/V[0, n_kv - n_masked(r)), and row 0 nothing beyond n1 / 2
++    int          n_threads;
++};
++
++// Runs attention of q over K/V rows [c0, c1) with the matching mask columns; returns output [n_rows][n_head][D] and
++// LSE [n_rows][n_head].
++static void run_fa(const fa_case & c, const std::vector<float> & q, const std::vector<float> & k, const std::vector<float> & v,
++        const std::vector<float> & mask, int64_t c0, int64_t c1, float scale, std::vector<float> & out, std::vector<float> & lse) {
++    const int64_t n_head = c.n_head_kv*c.gqa;
++    const int64_t n      = c1 - c0;
++
++    ggml_init_params ip = { 512ull*1024*1024, nullptr, false };
++    ggml_context * ctx = ggml_init(ip);
++
++    ggml_tensor * tq = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, c.D, c.n_rows, n_head, 1);
++    ggml_tensor * tk = ggml_new_tensor_4d(ctx, c.type_kv, c.D, n, c.n_head_kv, 1);
++    ggml_tensor * tv = ggml_new_tensor_4d(ctx, c.type_kv, c.D, n, c.n_head_kv, 1);
++    ggml_tensor * tm = ggml_new_tensor_4d(ctx, GGML_TYPE_F16, n, c.n_rows, 1, 1);
++
++    memcpy(tq->data, q.data(), q.size()*sizeof(float));
++    // K/V are [n_kv_total][head][D] in k/v; copy rows [c0, c1) of each head and convert or quantize them
++    std::vector<float> kp(c.D*n*c.n_head_kv), vp(c.D*n*c.n_head_kv);
++    for (int64_t h = 0; h < c.n_head_kv; ++h) {
++        for (int64_t i = 0; i < n; ++i) {
++            memcpy(&kp[(h*n + i)*c.D], &k[((c0 + i)*c.n_head_kv + h)*c.D], c.D*sizeof(float));
++            memcpy(&vp[(h*n + i)*c.D], &v[((c0 + i)*c.n_head_kv + h)*c.D], c.D*sizeof(float));
++        }
++    }
++    if (c.type_kv == GGML_TYPE_F16) {
++        ggml_fp32_to_fp16_row(kp.data(), (ggml_fp16_t *) tk->data, (int64_t) kp.size());
++        ggml_fp32_to_fp16_row(vp.data(), (ggml_fp16_t *) tv->data, (int64_t) vp.size());
++    } else {
++        ggml_quantize_chunk(c.type_kv, kp.data(), tk->data, 0, n*c.n_head_kv, c.D, nullptr);
++        ggml_quantize_chunk(c.type_kv, vp.data(), tv->data, 0, n*c.n_head_kv, c.D, nullptr);
++    }
++    std::vector<float> mp(n*c.n_rows);
++    for (int64_t r = 0; r < c.n_rows; ++r) {
++        memcpy(&mp[r*n], &mask[r*c.n_kv + c0], n*sizeof(float));
++    }
++    ggml_fp32_to_fp16_row(mp.data(), (ggml_fp16_t *) tm->data, (int64_t) mp.size());
++
++    ggml_tensor * fa = ggml_flash_attn_ext(ctx, tq, tk, tv, tm, scale, 0.0f, 0.0f);
++    lse.assign(c.n_rows*n_head, NAN);
++    float * p = lse.data();
++    memcpy(fa->op_params + GGML_FA_PARAM_LSE, &p, sizeof(p));
++
++    ggml_cgraph * gf = ggml_new_graph(ctx);
++    ggml_build_forward_expand(gf, fa);
++    ggml_graph_compute_with_ctx(ctx, gf, c.n_threads);
++
++    // dst is [D, n_head, n_rows, 1]
++    out.assign((const float *) fa->data, (const float *) fa->data + c.D*n_head*c.n_rows);
++    ggml_free(ctx);
++}
++
++static bool close(double a, double b, double atol, double rtol) {
++    if (std::isinf(a) || std::isinf(b)) {
++        return a == b;
++    }
++    return std::fabs(a - b) <= atol + rtol*std::fabs(b);
++}
++
++static int check(const fa_case & c) {
++    const int64_t n_head = c.n_head_kv*c.gqa;
++    const float   scale  = 1.0f/sqrtf((float) c.D);
++
++    std::vector<float> q(c.D*c.n_rows*n_head), k(c.n_kv*c.n_head_kv*c.D), v(c.n_kv*c.n_head_kv*c.D), mask(c.n_rows*c.n_kv, 0.0f);
++    for (auto & x : q) { x = 2.0f*frand(); }
++    for (auto & x : k) { x = 2.0f*frand(); }
++    for (auto & x : v) { x = frand(); }
++    if (c.masked_rows) {
++        for (int64_t r = 0; r < c.n_rows; ++r) {
++            // row 0 sees only the first half of part 1 (so part 2 is fully masked for it), the others lose a tail
++            const int64_t visible = r == 0 ? c.n1/2 : c.n_kv - 37*r;
++            for (int64_t i = visible; i < c.n_kv; ++i) {
++                mask[r*c.n_kv + i] = -INFINITY;
++            }
++        }
++    }
++
++    std::vector<float> o_all, l_all, o1, l1, o2, l2;
++    run_fa(c, q, k, v, mask, 0, c.n_kv, scale, o_all, l_all);
++    run_fa(c, q, k, v, mask, 0, c.n1, scale, o1, l1);
++    run_fa(c, q, k, v, mask, c.n1, c.n_kv, scale, o2, l2);
++
++    int bad = 0;
++    double max_do = 0.0, max_dl = 0.0, max_dref = 0.0, max_e_full = 0.0, max_e_merged = 0.0;
++    for (int64_t r = 0; r < c.n_rows; ++r) {
++        for (int64_t h = 0; h < n_head; ++h) {
++            const int64_t il = r*n_head + h;
++            // 1. merge the parts by LSE
++            const double a = l1[il], b = l2[il];
++            const double m = std::fmax(a, b);
++            const double wa = std::isinf(a) ? 0.0 : std::exp(a - m), wb = std::isinf(b) ? 0.0 : std::exp(b - m);
++            const double l_merged = m + std::log(wa + wb);
++            if (std::isnan(l_all[il]) || !close(l_merged, l_all[il], 1e-4, 1e-5)) {
++                if (bad++ < 5) {
++                    fprintf(stderr, "  %s: row %lld head %lld: lse parts %g, %g -> %g, full %g\n", c.name, (long long) r,
++                            (long long) h, a, b, l_merged, l_all[il]);
++                }
++            }
++            if (!std::isinf(l_all[il])) {
++                max_dl = std::fmax(max_dl, std::fabs(l_merged - l_all[il]));
++            }
++            const bool f16_acc = c.type_kv == GGML_TYPE_F16;
++            for (int64_t d = 0; d < c.D; ++d) {
++                const int64_t io = (r*n_head + h)*c.D + d;
++                const double merged = (wa*o1[io] + wb*o2[io])/(wa + wb);
++                max_do = std::fmax(max_do, std::fabs(merged - o_all[io]));
++                if (!f16_acc && !close(merged, o_all[io], 1e-4, 1e-3)) {
++                    if (bad++ < 5) {
++                        fprintf(stderr, "  %s: row %lld head %lld dim %lld: merged %g, full %g\n", c.name, (long long) r,
++                                (long long) h, (long long) d, merged, o_all[io]);
++                    }
++                }
++            }
++            if (f16_acc) {
++                // double-precision output from the f16 K/V the kernel reads
++                const int64_t hk = h / c.gqa;
++                std::vector<double> sc(c.n_kv);
++                double mx = -INFINITY;
++                for (int64_t i = 0; i < c.n_kv; ++i) {
++                    double dot = 0.0;
++                    for (int64_t d = 0; d < c.D; ++d) {
++                        dot += (double) q[(h*c.n_rows + r)*c.D + d]*ggml_fp16_to_fp32(ggml_fp32_to_fp16(k[(i*c.n_head_kv + hk)*c.D + d]));
++                    }
++                    sc[i] = scale*dot + mask[r*c.n_kv + i];
++                    mx = std::fmax(mx, sc[i]);
++                }
++                std::vector<double> ref(c.D, 0.0);
++                double sum = 0.0;
++                for (int64_t i = 0; i < c.n_kv; ++i) {
++                    const double w = std::isinf(sc[i]) ? 0.0 : std::exp(sc[i] - mx);
++                    sum += w;
++                    for (int64_t d = 0; d < c.D; ++d) {
++                        ref[d] += w*ggml_fp16_to_fp32(ggml_fp32_to_fp16(v[(i*c.n_head_kv + hk)*c.D + d]));
++                    }
++                }
++                double e_full = 0.0, e_merged = 0.0;
++                for (int64_t d = 0; d < c.D; ++d) {
++                    const int64_t io = (r*n_head + h)*c.D + d;
++                    e_full   = std::fmax(e_full,   std::fabs(o_all[io] - ref[d]/sum));
++                    e_merged = std::fmax(e_merged, std::fabs((wa*o1[io] + wb*o2[io])/(wa + wb) - ref[d]/sum));
++                }
++                max_e_full = std::fmax(max_e_full, e_full);
++                max_e_merged = std::fmax(max_e_merged, e_merged);
++            }
++            // 2. the LSE against double precision, from the inputs as the kernel sees K (f16-rounded; q8_0 is checked
++            //    against f16-rounded K too, with a looser bound for its quantization)
++            if (c.type_kv == GGML_TYPE_F16 || c.type_kv == GGML_TYPE_Q8_0) {
++                const int64_t hk = h / c.gqa;
++                double mx = -INFINITY;
++                std::vector<double> s(c.n_kv);
++                for (int64_t i = 0; i < c.n_kv; ++i) {
++                    double dot = 0.0;
++                    for (int64_t d = 0; d < c.D; ++d) {
++                        const float kf = ggml_fp16_to_fp32(ggml_fp32_to_fp16(k[(i*c.n_head_kv + hk)*c.D + d]));
++                        dot += (double) q[(h*c.n_rows + r)*c.D + d]*kf;
++                    }
++                    s[i] = scale*dot + mask[r*c.n_kv + i];
++                    mx = std::fmax(mx, s[i]);
++                }
++                double sum = 0.0;
++                for (int64_t i = 0; i < c.n_kv; ++i) {
++                    sum += std::isinf(s[i]) ? 0.0 : std::exp(s[i] - mx);
++                }
++                const double ref = mx + std::log(sum);
++                const double tol = c.type_kv == GGML_TYPE_F16 ? 2e-2 : 1e-1;
++                max_dref = std::fmax(max_dref, std::fabs(ref - l_all[il]));
++                if (!close(l_all[il], ref, tol, 0.0)) {
++                    if (bad++ < 5) {
++                        fprintf(stderr, "  %s: row %lld head %lld: lse %g, reference %g\n", c.name, (long long) r,
++                                (long long) h, l_all[il], ref);
++                    }
++                }
++            }
++        }
++    }
++    // 3. the fully masked part of row 0 must be -inf
++    if (c.masked_rows) {
++        for (int64_t h = 0; h < n_head; ++h) {
++            if (!(std::isinf(l2[h]) && l2[h] < 0)) {
++                if (bad++ < 5) {
++                    fprintf(stderr, "  %s: head %lld: fully masked part has lse %g, expected -inf\n", c.name, (long long) h, l2[h]);
++                }
++            }
++        }
++    }
++    if (max_e_merged > 2.0*max_e_full + 1e-5) {
++        fprintf(stderr, "  %s: merged output error %g against double precision, full run %g\n", c.name, max_e_merged, max_e_full);
++        bad++;
++    }
++    printf("%-28s %s  (max |merged - full|: out %.2e, lse %.2e; |lse - double ref| %.2e", c.name, bad ? "FAIL" : "ok",
++            max_do, max_dl, max_dref);
++    if (c.type_kv == GGML_TYPE_F16) {
++        printf("; out vs double: full %.2e, merged %.2e", max_e_full, max_e_merged);
++    }
++    printf(")\n");
++    return bad;
++}
++
++int main(void) {
++    const fa_case cases[] = {
++        // name                          type            D   kvh gqa rows  n_kv    n1  masked thr
++        { "q8_0 decode, 12 threads",     GGML_TYPE_Q8_0, 256, 4, 6,  1,    3000,  1234, false, 12 },
++        { "q8_0 decode, 1 thread",       GGML_TYPE_Q8_0, 256, 4, 6,  1,    3000,  1234, false,  1 },
++        { "f16 decode split-KV",         GGML_TYPE_F16,  256, 4, 6,  1,    3000,  1000, false, 12 },
++        { "f16 decode masked",           GGML_TYPE_F16,  256, 4, 6,  1,    3000,  1000, true,  12 },
++        { "f16 7 rows masked",           GGML_TYPE_F16,  256, 4, 6,  7,    2000,   700, true,  12 },
++        { "f16 7 rows, 1 thread",        GGML_TYPE_F16,  256, 4, 6,  7,    2000,   700, true,   1 },
++        { "q8_0 5 rows masked",          GGML_TYPE_Q8_0, 256, 4, 6,  5,    2000,   900, true,  12 },
++        { "f16 64 rows",                 GGML_TYPE_F16,  128, 2, 4, 64,    1024,   512, false, 12 },
++        { "q8_0 32 rows, D=128",         GGML_TYPE_Q8_0, 128, 8, 4, 32,    1500,   333, true,  12 },
++    };
++    int bad = 0;
++    for (const auto & c : cases) {
++        bad += check(c) ? 1 : 0;
++    }
++    printf("%s\n", bad ? "FAILED" : "all passed");
++    return bad ? 1 : 0;
++}
+-- 
+2.53.0
+

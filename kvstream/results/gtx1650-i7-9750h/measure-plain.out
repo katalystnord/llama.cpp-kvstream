@@ -1,0 +1,5 @@
+[2026-10-29 19:13:00] plain-43008 up: 19:12:58,4,5.52,300,51,0x0000000000000004,122,4968
+{"label": "plain@42008", "prompt_tokens": 42076, "wall_s": 389.8, "prefill_tps": 110.2, "decode_tps": 17.4, "draft": "None/None", "needle_found": true}
+{"label": "plain@8000", "prompt_tokens": 8068, "wall_s": 54.2, "prefill_tps": 168.9, "decode_tps": 25.7, "draft": "None/None", "needle_found": true}
+{"label": "plain@32000", "prompt_tokens": 32069, "wall_s": 269.5, "prefill_tps": 122.8, "decode_tps": 19.2, "draft": "None/None", "needle_found": true}
+[2026-10-29 19:24:57] MEASURE DONE: plain

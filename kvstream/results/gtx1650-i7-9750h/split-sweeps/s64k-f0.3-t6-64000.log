@@ -1,0 +1,39 @@
+0.00.082.656 I srv  llama_server: initializing ...
+0.00.082.667 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)
+0.00.083.003 W srv  llama_server: security: no API key is set and CORS allows all origins (see https://github.com/ggml-org/llama.cpp/pull/25655)
+0.00.085.370 I srv    load_model: loading model '~/code/kv-stream-brick/models/Qwen3.5-4B-Q4_K_M.gguf'
+0.01.447.020 W create: split attention on: CPU share 0.30 of the streamed pages, 6 threads
+0.01.473.358 W create: split attention on: CPU share 0.30 of the streamed pages, 6 threads
+0.01.474.193 W memory_phase: phase=prefill parent=671088640 compute=333736192 kv_pool=228019968 writer=280576 attention=109051904 persistent_kv=0 publication_stage=0 unused=0 reclaimed_compute=0 capture=external transition_us=0 arena_gen=1 kv_revision=1 resident_pages=65 ring_slots=15 active_pages=0 streaming=0 last_h2d_bytes=0 last_h2d_calls=0 copy_ms=0.000 elapsed_ms=0.000
+0.01.478.987 I cmn          init: llama threadpool init, n_threads = 6
+0.01.481.035 W KV_reload: bytes=3407872 calls=16 padded_rows=256 drain_us=1 upload_us=422 begin_us=34858554164 end_us=34858554592
+0.01.659.749 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 65536, kv_unified = 'false'
+0.01.664.413 I srv  llama_server: model loaded
+0.01.664.419 I srv  llama_server: listening on http://127.0.0.1:8098
+0.02.264.263 I slot load_slot_ch: id  0 | task -1 | restored 2 context checkpoint(s) from '~/code/kv-stream-brick/slots/fill-65536-640-64000.bin'
+0.02.398.887 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, f_sim_best = 1.000 (> 0.100 thold), f_keep = 0.999
+0.02.398.987 I slot launch_slot_: id  0 | task 1 | processing task, is_child = 0
+0.02.650.628 W create: split attention on: CPU share 0.30 of the streamed pages, 6 threads
+0.02.653.140 W memory_phase: phase=decode parent=671088640 compute=4924160 kv_pool=665474048 writer=280576 attention=409856 persistent_kv=0 publication_stage=0 unused=0 reclaimed_compute=328812032 capture=external transition_us=2177 arena_gen=2 kv_revision=2 resident_pages=186 ring_slots=74 active_pages=250 streaming=1 last_h2d_bytes=630456320 last_h2d_calls=968 copy_ms=0.000 elapsed_ms=0.000
+0.02.653.970 W create: split attention on: CPU share 0.30 of the streamed pages, 6 threads
+0.02.654.777 W begin: KV layout revision 3, resident pages/layer 186, ring slots 74, active pages 251, padded H2D 211.25 MiB/eval
+0.02.705.857 W KV_reload: bytes=633864192 calls=16 padded_rows=64256 drain_us=1 upload_us=51064 begin_us=34859728343 end_us=34859779412
+0.02.766.636 W attention: accepted KV layout copied 208.01 MiB in 130 H2D calls, peak ring pages 74, sampled copy 2.223 ms over 60.738 ms
+0.04.914.794 W split: context 64256, CPU takes 38912 tokens in 8 of 8 layers; per step: CPU waited 0.1 ms for Q, attended 7.4 ms (8.5 GB/s), host blocked 6.4 ms
+0.07.142.295 W split: context 64256, CPU takes 38912 tokens in 8 of 8 layers; per step: CPU waited 0.1 ms for Q, attended 9.3 ms (7.0 GB/s), host blocked 8.3 ms
+0.09.372.905 W split: context 64256, CPU takes 38912 tokens in 8 of 8 layers; per step: CPU waited 0.1 ms for Q, attended 9.4 ms (6.9 GB/s), host blocked 8.3 ms
+0.09.592.018 I slot print_timing: id  0 | task 1 | n_gen =    100, tg =  14.26 t/s, tg_3s =  14.40 t/s
+0.11.691.418 W split: context 64256, CPU takes 38912 tokens in 8 of 8 layers; per step: CPU waited 0.1 ms for Q, attended 11.7 ms (5.5 GB/s), host blocked 10.6 ms
+0.12.611.120 I slot print_timing: id  0 | task 1 | n_gen =    142, tg =  14.15 t/s, tg_3s =  13.91 t/s
+0.13.935.481 W split: context 64256, CPU takes 38912 tokens in 8 of 8 layers; per step: CPU waited 0.1 ms for Q, attended 11.0 ms (5.9 GB/s), host blocked 10.4 ms
+0.15.632.932 I slot print_timing: id  0 | task 1 | n_gen =    185, tg =  14.17 t/s, tg_3s =  14.23 t/s
+0.16.186.052 W split: context 64256, CPU takes 38912 tokens in 8 of 8 layers; per step: CPU waited 0.1 ms for Q, attended 11.0 ms (5.9 GB/s), host blocked 10.2 ms
+0.18.439.157 W split: context 64256, CPU takes 38912 tokens in 8 of 8 layers; per step: CPU waited 0.1 ms for Q, attended 10.3 ms (6.3 GB/s), host blocked 9.4 ms
+0.18.661.790 I slot print_timing: id  0 | task 1 | n_gen =    228, tg =  14.18 t/s, tg_3s =  14.20 t/s
+0.20.641.325 I slot print_timing: id  0 | task 1 | prompt eval time =     250.40 ms /     4 tokens (   62.60 ms per token,    15.97 tokens per second)
+0.20.641.332 I slot print_timing: id  0 | task 1 |        eval time =   17991.92 ms /   256 tokens (   70.56 ms per token,    14.17 tokens per second)
+0.20.641.333 I slot print_timing: id  0 | task 1 |       total time =   18242.31 ms /   260 tokens
+0.20.641.337 I slot print_timing: id  0 | task 1 |    graphs reused =        255
+0.20.644.450 I slot      release: id  0 | task 1 | stop processing: n_tokens = 64255, truncated = 0
+0.20.700.361 I srv    operator(): operator(): cleaning up before exit...
+0.20.702.018 W ~llama_context:  CUDA_Host compute buffer size of   0.4299 MiB, does not match expectation of  42.2774 MiB

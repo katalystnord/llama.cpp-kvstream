@@ -1,0 +1,3 @@
+[17:35:50] fnone-t0-130000: restored: {"id_slot":0,"filename":"fill-131072-896-130000.bin","n_restored":130063,"n_read":1893115392,"timings":{"restore_ms":485.633}}
+{"label": "rep130k-fnone-t0-130000", "prompt_tokens_requested": 130000, "start": "17:35:50", "prompt_n": 4, "prefill_tps": 9.61, "gen_n": 256, "decode_tps": 8.58, "text": "\n\n<think>\nThinking Process:\n\n1.  **Analyze the Request:**\n    *   Input: A long te
+[17:36:23] SWEEP DONE

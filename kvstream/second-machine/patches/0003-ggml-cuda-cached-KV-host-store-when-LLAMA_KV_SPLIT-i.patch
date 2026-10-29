@@ -1,0 +1,33 @@
+From 6dcc93678a58dafb7688730ad8ca4a9b35255eac Mon Sep 17 00:00:00 2001
+From: David <david@katalystnord.com>
+Date: Thu, 29 Oct 2026 18:59:44 +0100
+Subject: [PATCH 3/6] ggml-cuda: cached KV host store when LLAMA_KV_SPLIT is
+ set
+
+The KV host store is allocated write-combined on Linux, which the CPU reads
+uncached: CPU attention over it ran at 57 MB/s. With LLAMA_KV_SPLIT set the store
+is allocated mapped without write-combining. Copy speed to the GPU is unchanged
+(130K, 1.65 GB streamed per token: 8.65 against 8.64 t/s).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ ggml/src/ggml-cuda/ggml-cuda.cu | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/ggml/src/ggml-cuda/ggml-cuda.cu b/ggml/src/ggml-cuda/ggml-cuda.cu
+index a746d5b90..d5e5860e6 100644
+--- a/ggml/src/ggml-cuda/ggml-cuda.cu
++++ b/ggml/src/ggml-cuda/ggml-cuda.cu
+@@ -1464,7 +1464,8 @@ static ggml_backend_buffer_t ggml_backend_cuda_kv_host_alloc(ggml_backend_buffer
+ #ifdef _WIN32
+         const unsigned int flags = cudaHostAllocMapped;
+ #else
+-        const unsigned int flags = cudaHostAllocMapped | cudaHostAllocWriteCombined;
++        // Split attention (LLAMA_KV_SPLIT) reads the store on the CPU, where write-combined memory is uncached and slow.
++        const unsigned int flags = getenv("LLAMA_KV_SPLIT") ? cudaHostAllocMapped : cudaHostAllocMapped | cudaHostAllocWriteCombined;
+ #endif
+         const auto error = cudaHostAlloc(&context->data, size, flags);
+         if (error != cudaSuccess) {
+-- 
+2.53.0
+

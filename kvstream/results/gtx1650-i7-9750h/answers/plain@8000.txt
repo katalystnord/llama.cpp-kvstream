@@ -1,0 +1,3 @@
+Question 1: The code word for the beast test is **MARMALADE-7**.
+
+Question 2: The file `llama-context.cpp` defines the `llama_context` class, which initializes the runtime environment for a Llama.cpp inference session. It constructs the context by allocating memory buffers, configuring parameters like sequence length and context size, and setting up backend samplers. The code handles complex logic for advanced features such as YARN attention scaling, fused operations (Flash Attention, GDN), and specialized architectures like Gemma4 Assistant and Qwen35 MTP. It validates compatibility between the model and context parameters, initializes GPU backends, and prepares the graph execution pipeline before handing control to the main inference loop.

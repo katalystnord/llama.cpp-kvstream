@@ -1,0 +1,150 @@
+{
+  "_about": "Numbers behind the README figures, each with the log it comes from (kvstream/results/rx9070-ryzen5900x/). RX 9070 (non-XT, 16 GB), Ryzen 9 5900X, dual-channel DDR4, PCIe 4.0. Rebuild the figures with kvstream/scripts/make-figures.py.",
+  "context": {
+    "title": "Qwen3.8 27B: writing speed against context, RX 9070 16 GB",
+    "plain": {
+      "label": "llama.cpp, cache on the GPU",
+      "points": [
+        [
+          8070,
+          43.6
+        ],
+        [
+          32068,
+          33.4
+        ],
+        [
+          45069,
+          35.2
+        ]
+      ],
+      "limit_tokens": 49152,
+      "source": "plain-vs-stream-2026-10-29.log (everyday Vulkan build, 48K window, q8_0 K and V, MTP drafting)"
+    },
+    "spill_cpu": {
+      "label": "spill: cache in RAM, CPU attention",
+      "points": [
+        [
+          64069,
+          5.2
+        ],
+        [
+          125068,
+          3.6
+        ]
+      ],
+      "source": "plain-vs-stream-2026-10-29.log (same build, --no-kv-offload, 131K window, MTP drafting)"
+    },
+    "spill_driver": {
+      "label": "spill: driver pages GPU memory to RAM",
+      "points": [
+        [
+          125068,
+          3.2
+        ]
+      ],
+      "source": "plain-vs-stream-2026-10-29.log (this fork's HIP build without the stream, GGML_CUDA_ENABLE_UNIFIED_MEMORY=1, MTP drafting)"
+    },
+    "stream": {
+      "label": "with the KV stream",
+      "points": [
+        [
+          8070,
+          55.1
+        ],
+        [
+          32068,
+          53.2
+        ],
+        [
+          64069,
+          52.8
+        ],
+        [
+          125068,
+          33.7
+        ],
+        [
+          250068,
+          12.0
+        ]
+      ],
+      "source": "plain-vs-stream-2026-10-29.log (8K-64K), split-ceiling-2026-10-29.log f0-t0 (125K; 32.6 to 34.0 over five runs), m250k-2026-10-29.log (250K); q8_0 K and V, MTP drafting, 2420 MiB pool"
+    }
+  },
+  "vs_ram": {
+    "title": "Qwen3.8 27B at 125K: the stream against spilling to RAM",
+    "bars": [
+      [
+        "Spill: the driver pages GPU memory to RAM",
+        3.2
+      ],
+      [
+        "Spill: cache in RAM, attention on the CPU",
+        3.6
+      ],
+      [
+        "KV stream",
+        33.7
+      ]
+    ],
+    "source": "plain-vs-stream-2026-10-29.log, split-ceiling-2026-10-29.log; writing t/s, MTP drafting"
+  },
+  "split": {
+    "title": "Saluki 27B at 150K: split attention",
+    "measured": {
+      "label": "measured",
+      "tps": [
+        [
+          0.0,
+          8.9
+        ],
+        [
+          0.3,
+          11.3
+        ],
+        [
+          0.4,
+          11.7
+        ]
+      ]
+    },
+    "ceiling": {
+      "label": "if the CPU part took no time",
+      "tps": [
+        [
+          0.0,
+          8.9
+        ],
+        [
+          0.3,
+          12.6
+        ],
+        [
+          0.5,
+          16.3
+        ]
+      ]
+    },
+    "settled": 0.3,
+    "source": "server-sweep-*-saluki-kscore-2026-10-29.log and split-ceiling-2026-10-29.log: whole-answer averages, no drafting, 16 CPU threads; auto settled at 0.3 (0.4 was not 2% faster)"
+  },
+  "reask": {
+    "title": "A 125K-token document: read once, ask again",
+    "bars": [
+      [
+        "Read the document",
+        212.0
+      ],
+      [
+        "Restore it from disk and answer",
+        4.6
+      ],
+      [
+        "Answer while it is still loaded",
+        4.8
+      ]
+    ],
+    "source": "save-restore-2026-10-28.log (Qwen3.8 27B, restore 2.7 s + answer 1.9 s)"
+  }
+}

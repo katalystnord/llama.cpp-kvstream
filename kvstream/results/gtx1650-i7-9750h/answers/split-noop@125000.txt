@@ -1,0 +1,5 @@
+**Question 1:**
+The code word for the beast test is **MARMALADE-7**.
+
+**Question 2:**
+The file `llama-context.cpp` implements the `llama_context` class, which serves as the central execution engine for the llama.cpp inference library. It manages the lifecycle of a model run, including initialization, memory allocation, and graph construction. The code handles complex memory management strategies like KV cache streaming, MTP (Multi-Token Prediction), and shared device buffers. It orchestrates the compilation of computation graphs, resolves fused operations (like Flash Attention), and coordinates asynchronous tensor transfers between the CPU and GPU backends. Additionally, it manages sampling states, LoRA adapters, and various optimization flags, ensuring efficient token generation and decoding across different hardware architectures.

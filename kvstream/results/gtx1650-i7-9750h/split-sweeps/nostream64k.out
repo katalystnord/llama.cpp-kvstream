@@ -1,0 +1,7 @@
+{"label": "nostream64k-fill-64000", "prompt_tokens_requested": 64000, "start": "17:51:09", "prompt_n": 64000, "prefill_tps": 88.62, "gen_n": 64, "decode_tps": 14.31, "text": "\n\n<think>\nThinking Process:\n\n1.  **Analy
+[18:03:19] saved: {"id_slot":0,"filename":"fill-131072-896-64000.bin","n_saved":64063,"n_written":1012675392,"timings":{"save_ms":3287.996}}
+[18:03:26] fnone-t0-64000: restored: {"id_slot":0,"filename":"fill-131072-896-64000.bin","n_restored":64063,"n_read":1012675392,"timings":{"restore_ms":309.399}}
+{"label": "nostream64k-fnone-t0-64000", "prompt_tokens_requested": 64000, "start": "18:03:26", "prompt_n": 4, "prefill_tps": 13.33, "gen_n": 64, "decode_tps": 14.46, "text": "\n\n<think>\nThinking Process:\n\n1.  **Analyze the Request:**\n    *   Input: A long
+[18:03:38] fauto-t6-64000: restored: {"id_slot":0,"filename":"fill-131072-896-64000.bin","n_restored":64063,"n_read":1012675392,"timings":{"restore_ms":284.6}}
+{"label": "nostream64k-fauto-t6-64000", "prompt_tokens_requested": 64000, "start": "18:03:38", "prompt_n": 4, "prefill_tps": 14.14, "gen_n": 64, "decode_tps": 14.53, "text": "\n\n<think>\nThinking Process:\n\n1.  **Analyze the Request:**\n    *   Input: A long
+[18:03:45] SWEEP DONE

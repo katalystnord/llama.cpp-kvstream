@@ -1,0 +1,71 @@
+0.00.037.196 I srv  llama_server: initializing ...
+0.00.037.214 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)
+0.00.037.620 W srv  llama_server: security: no API key is set and CORS allows all origins (see https://github.com/ggml-org/llama.cpp/pull/25655)
+0.00.039.825 I srv    load_model: loading model '~/code/kv-stream-brick/models/Qwen3.5-4B-Q4_K_M.gguf'
+0.01.010.145 I cmn          init: llama threadpool init, n_threads = 6
+0.01.149.242 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 45056, kv_unified = 'false'
+0.01.153.619 I srv  llama_server: model loaded
+0.01.153.625 I srv  llama_server: listening on http://127.0.0.1:8099
+0.02.189.346 I slot get_availabl: id  0 | task -1 | selected slot by LRU, t_last = -1
+0.02.189.396 I slot launch_slot_: id  0 | task 0 | processing task, is_child = 0
+~/code/kv-stream-brick/llama.cpp-adaptive-kv-streaming/ggml/src/ggml-cuda/ggml-cuda.cu:113: CUDA error
+0.02.208.381 E CUDA error: out of memory
+0.02.208.387 E   current device: 0, in function alloc at ~/code/kv-stream-brick/llama.cpp-adaptive-kv-streaming/ggml/src/ggml-cuda/ggml-cuda.cu:610
+0.02.208.387 E   cuMemCreate(&handle, reserve_size, &prop, 0)
+[New LWP 176535]
+[New LWP 176530]
+[New LWP 176529]
+[New LWP 176528]
+[New LWP 176527]
+[New LWP 176526]
+[New LWP 176525]
+[New LWP 176524]
+[New LWP 176523]
+[New LWP 176522]
+[New LWP 176521]
+[New LWP 176520]
+[New LWP 176519]
+[New LWP 176518]
+[New LWP 176517]
+[New LWP 176516]
+[New LWP 176508]
+[New LWP 176507]
+[New LWP 176506]
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/usr/lib/x86_64-linux-gnu/libthread_db.so.1".
+__syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+⚠️ warning: 56	../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S: No such file or directory
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+56	in ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S
+#1  0x0000782effaa039c in __internal_syscall_cancel (a1=<optimized out>, a2=<optimized out>, a3=<optimized out>, a4=<optimized out>, a5=0, a6=0, nr=61) at ./nptl/cancellation.c:49
+⚠️ warning: 49	./nptl/cancellation.c: No such file or directory
+#2  __syscall_cancel (a1=<optimized out>, a2=<optimized out>, a3=<optimized out>, a4=<optimized out>, a5=a5@entry=0, a6=a6@entry=0, nr=61) at ./nptl/cancellation.c:75
+75	in ./nptl/cancellation.c
+#3  0x0000782effb1cacf in __GI___wait4 (pid=<optimized out>, stat_loc=<optimized out>, options=<optimized out>, usage=<optimized out>) at ../sysdeps/unix/sysv/linux/wait4.c:30
+⚠️ warning: 30	../sysdeps/unix/sysv/linux/wait4.c: No such file or directory
+#4  0x0000782f00136773 in ggml_print_backtrace () from ~/code/kv-stream-brick/llama.cpp-adaptive-kv-streaming/build-sm75/bin/libggml-base.so.0
+#5  0x0000782f00136926 in ggml_abort () from ~/code/kv-stream-brick/llama.cpp-adaptive-kv-streaming/build-sm75/bin/libggml-base.so.0
+#6  0x0000782ee892c2f7 in ggml_cuda_error(char const*, char const*, char const*, int, char const*) () from ~/code/kv-stream-brick/llama.cpp-adaptive-kv-streaming/build-sm75/bin/libggml-cuda.so.0
+#7  0x0000782ee894b4c3 in ggml_cuda_pool_vmm::alloc(unsigned long, unsigned long*) () from ~/code/kv-stream-brick/llama.cpp-adaptive-kv-streaming/build-sm75/bin/libggml-cuda.so.0
+#8  0x0000782ee9248e05 in void launch_mul_mat_q<(ggml_type)13, 128, false, (ggml_prec)30>(ggml_backend_cuda_context&, mmq_args const&, CUstream_st*) () from ~/code/kv-stream-brick/llama.cpp-adaptive-kv-streaming/build-sm75/bin/libggml-cuda.so.0
+#9  0x0000782ee89adf7b in ggml_cuda_mul_mat_q(ggml_backend_cuda_context&, ggml_tensor const*, ggml_tensor const*, ggml_tensor const*, ggml_tensor*) () from ~/code/kv-stream-brick/llama.cpp-adaptive-kv-streaming/build-sm75/bin/libggml-cuda.so.0
+#10 0x0000782ee8941f67 in ggml_cuda_compute_forward(ggml_backend_cuda_context&, ggml_tensor*) () from ~/code/kv-stream-brick/llama.cpp-adaptive-kv-streaming/build-sm75/bin/libggml-cuda.so.0
+#11 0x0000782ee894604b in ggml_backend_cuda_graph_compute(ggml_backend*, ggml_cgraph*) () from ~/code/kv-stream-brick/llama.cpp-adaptive-kv-streaming/build-sm75/bin/libggml-cuda.so.0
+#12 0x0000782f001579b7 in ggml_backend_sched_graph_compute_async () from ~/code/kv-stream-brick/llama.cpp-adaptive-kv-streaming/build-sm75/bin/libggml-base.so.0
+#13 0x0000782efee777cf in llama_context_memory::compute_async(ggml_cgraph*) () from ~/code/kv-stream-brick/llama.cpp-adaptive-kv-streaming/build-sm75/bin/libllama.so.0
+#14 0x0000782efee592a0 in llama_context::graph_compute(ggml_cgraph*, bool) () from ~/code/kv-stream-brick/llama.cpp-adaptive-kv-streaming/build-sm75/bin/libllama.so.0
+#15 0x0000782efee60061 in llama_context::process_ubatch(llama_ubatch const&, llm_graph_type, llama_memory_context_i*, llama_memory_text_phase, ggml_status&) () from ~/code/kv-stream-brick/llama.cpp-adaptive-kv-streaming/build-sm75/bin/libllama.so.0
+#16 0x0000782efee6c741 in llama_context::decode(llama_batch_ext const&) () from ~/code/kv-stream-brick/llama.cpp-adaptive-kv-streaming/build-sm75/bin/libllama.so.0
+#17 0x0000782f003821f5 in std::_Function_handler<void (), server_context_impl::decode(int&, int)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from ~/code/kv-stream-brick/llama.cpp-adaptive-kv-streaming/build-sm75/bin/libllama-server-impl.so
+#18 0x0000782f0032edf9 in server_queue::yield_to_queue(std::function<void ()>&&) () from ~/code/kv-stream-brick/llama.cpp-adaptive-kv-streaming/build-sm75/bin/libllama-server-impl.so
+#19 0x0000782f00390b5f in server_context_impl::decode(int&, int) () from ~/code/kv-stream-brick/llama.cpp-adaptive-kv-streaming/build-sm75/bin/libllama-server-impl.so
+#20 0x0000782f00392ab8 in server_context_impl::update_slots() () from ~/code/kv-stream-brick/llama.cpp-adaptive-kv-streaming/build-sm75/bin/libllama-server-impl.so
+#21 0x0000782f00332398 in server_queue::start_loop(long) () from ~/code/kv-stream-brick/llama.cpp-adaptive-kv-streaming/build-sm75/bin/libllama-server-impl.so
+#22 0x0000782f002e0b6e in llama_server(common_params&, int, char**, server_child&) () from ~/code/kv-stream-brick/llama.cpp-adaptive-kv-streaming/build-sm75/bin/libllama-server-impl.so
+#23 0x0000782f002e27a3 in llama_server(int, char**) () from ~/code/kv-stream-brick/llama.cpp-adaptive-kv-streaming/build-sm75/bin/libllama-server-impl.so
+#24 0x0000782effa2a601 in __libc_start_call_main (main=main@entry=0x59fd8b75f2f0 <main>, argc=argc@entry=28, argv=argv@entry=0x7ffdb4f39898) at ../sysdeps/nptl/libc_start_call_main.h:59
+⚠️ warning: 59	../sysdeps/nptl/libc_start_call_main.h: No such file or directory
+#25 0x0000782effa2a718 in __libc_start_main_impl (main=0x59fd8b75f2f0 <main>, argc=28, argv=0x7ffdb4f39898, init=<optimized out>, fini=<optimized out>, rtld_fini=<optimized out>, stack_end=0x7ffdb4f39888) at ../csu/libc-start.c:360
+⚠️ warning: 360	../csu/libc-start.c: No such file or directory
+#26 0x000059fd8b75f325 in _start ()
+[Inferior 1 (process 176492) detached]

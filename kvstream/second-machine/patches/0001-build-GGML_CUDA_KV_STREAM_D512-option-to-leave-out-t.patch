@@ -1,0 +1,74 @@
+From c741f154c9c66883435737f60a265a80e80b12f4 Mon Sep 17 00:00:00 2001
+From: David <david@katalystnord.com>
+Date: Thu, 29 Oct 2026 18:59:44 +0100
+Subject: [PATCH 1/6] build: GGML_CUDA_KV_STREAM_D512 option to leave out the
+ head-512 streamed MMA units
+
+The six head-512 kv-stream-mma-runtime units need more than 24 GB of RAM each in
+cicc; they are only used by Gemma 4. With -DGGML_CUDA_KV_STREAM_D512=OFF they are
+not compiled and the runtime reports the kernel as unavailable, so the build fits
+a laptop with 32 GB (brick: GTX 1650 Max-Q, sm_75).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ ggml/CMakeLists.txt                     |  1 +
+ ggml/src/ggml-cuda/CMakeLists.txt       | 12 +++++++++---
+ ggml/src/ggml-cuda/kv-stream-runtime.cu |  8 +++++++-
+ 3 files changed, 17 insertions(+), 4 deletions(-)
+
+diff --git a/ggml/CMakeLists.txt b/ggml/CMakeLists.txt
+index 3eacd4cd5..83ba34397 100644
+--- a/ggml/CMakeLists.txt
++++ b/ggml/CMakeLists.txt
+@@ -205,6 +205,7 @@ option(GGML_CUDA_NO_PEER_COPY               "ggml: do not use peer to peer copie
+ option(GGML_CUDA_NO_VMM                     "ggml: do not try to use CUDA VMM"                OFF)
+ option(GGML_CUDA_FA                         "ggml: compile ggml FlashAttention CUDA kernels"  ON)
+ option(GGML_CUDA_FA_ALL_QUANTS              "ggml: compile all quants for FlashAttention"     OFF)
++option(GGML_CUDA_KV_STREAM_D512             "ggml: compile head-512 streamed MMA kernels"     ON)
+ set   (GGML_CUDA_FA_QUANTS "q4_0-q4_0;q8_0-q8_0;f16-f16;bf16-bf16" CACHE STRING
+                                             "ggml: FlashAttention K-V type combinations to compile, \"all\" or a list such as \"q8_0-q8_0;q8_0-q4_0\"")
+ option(GGML_CUDA_GRAPHS                     "ggml: use CUDA graphs (llama.cpp only)"          ${GGML_CUDA_GRAPHS_DEFAULT})
+diff --git a/ggml/src/ggml-cuda/CMakeLists.txt b/ggml/src/ggml-cuda/CMakeLists.txt
+index 2069e70aa..5e9abc98c 100644
+--- a/ggml/src/ggml-cuda/CMakeLists.txt
++++ b/ggml/src/ggml-cuda/CMakeLists.txt
+@@ -157,9 +157,15 @@ if (CUDAToolkit_FOUND)
+         list(APPEND GGML_SOURCES_CUDA "${KV_STREAM_TILE_INSTANCE}")
+     endforeach()
+ 
+-    include(${CMAKE_CURRENT_SOURCE_DIR}/kv-stream-runtime.cmake)
+-    ggml_cuda_kv_stream_runtime_instances("${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}" SRCS)
+-    list(APPEND GGML_SOURCES_CUDA ${SRCS})
++    # brick: the head-512 streamed MMA units need more than 24 GB of host RAM each in cicc; OFF skips them
++    # (head-512 streaming, i.e. Gemma 4 global layers, then reports the kernel as unavailable).
++    if (GGML_CUDA_KV_STREAM_D512)
++        include(${CMAKE_CURRENT_SOURCE_DIR}/kv-stream-runtime.cmake)
++        ggml_cuda_kv_stream_runtime_instances("${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}" SRCS)
++        list(APPEND GGML_SOURCES_CUDA ${SRCS})
++    else()
++        set_source_files_properties(kv-stream-runtime.cu PROPERTIES COMPILE_DEFINITIONS GGML_CUDA_NO_KV_STREAM_D512)
++    endif()
+ 
+     ggml_add_backend_library(ggml-cuda
+                              ${GGML_HEADERS_CUDA}
+diff --git a/ggml/src/ggml-cuda/kv-stream-runtime.cu b/ggml/src/ggml-cuda/kv-stream-runtime.cu
+index f55cb70ae..90db206f8 100644
+--- a/ggml/src/ggml-cuda/kv-stream-runtime.cu
++++ b/ggml/src/ggml-cuda/kv-stream-runtime.cu
+@@ -1,6 +1,12 @@
+ #include "kv-stream-runtime.cuh"
+ 
+-#if !defined(GGML_USE_HIP) && !defined(GGML_USE_MUSA)
++#if !defined(GGML_USE_HIP) && !defined(GGML_USE_MUSA) && defined(GGML_CUDA_NO_KV_STREAM_D512)
++// Head-512 streamed MMA units not compiled: report the kernel as unavailable.
++ggml_kv_mma_runtime_kernel_t ggml_cuda_kv_stream_mma_runtime_kernel(
++        ggml_type, ggml_type, uint32_t, uint32_t, bool, bool) {
++    return nullptr;
++}
++#elif !defined(GGML_USE_HIP) && !defined(GGML_USE_MUSA)
+ #define RUNTIME_DECLARE(C,G) ggml_kv_mma_runtime_kernel_t ggml_cuda_kv_stream_mma_runtime_kernel_##C##_##G(bool,bool,bool);
+ RUNTIME_DECLARE(1,8)
+ RUNTIME_DECLARE(2,8)
+-- 
+2.53.0
+

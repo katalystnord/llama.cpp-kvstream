@@ -1,0 +1,15 @@
+[17:28:39] fnone-t0-130000: restored: {"id_slot":0,"filename":"fill-131072-896-130000.bin","n_restored":130063,"n_read":1893115392,"timings":{"restore_ms":504.637}}
+{"label": "auto-130k-fnone-t0-130000", "prompt_tokens_requested": 130000, "start": "17:28:39", "prompt_n": 4, "prefill_tps": 9.61, "gen_n": 256, "decode_tps": 8.56, "text": "\n\n<think>\nThinking Process:\n\n1.  **Analyze the Request:**\n    *   Input: A long 
+[17:29:17] f0.5-t6-130000: restored: {"id_slot":0,"filename":"fill-131072-896-130000.bin","n_restored":130063,"n_read":1893115392,"timings":{"restore_ms":507.017}}
+{"label": "auto-130k-f0.5-t6-130000", "prompt_tokens_requested": 130000, "start": "17:29:17", "prompt_n": 4, "prefill_tps": 8.45, "gen_n": 256, "decode_tps": 9.69, "text": "\n\n<think>\nThinking Process:\n\n1.  **Analyze the Request:**\n    *   Input: A long t
+0.24.701.425 W split: context 130304, CPU takes 278528 tokens in 8 of 8 layers; per step: CPU waited 0.1 ms for Q, attended 65.6 ms (7.1 GB/s), host blocked 64.8 ms
+0.28.046.945 W split: context 130304, CPU takes 278528 tokens in 8 of 8 layers; per step: CPU waited 0.1 ms for Q, attended 62.6 ms (7.4 GB/s), host blocked 61.6 ms
+[17:29:51] fauto-t6-130000: restored: {"id_slot":0,"filename":"fill-131072-896-130000.bin","n_restored":130063,"n_read":1893115392,"timings":{"restore_ms":524.093}}
+{"label": "auto-130k-fauto-t6-130000", "prompt_tokens_requested": 130000, "start": "17:29:51", "prompt_n": 4, "prefill_tps": 8.61, "gen_n": 256, "decode_tps": 8.6, "text": "\n\n<think>\nThinking Process:\n\n1.  **Analyze the Request:**\n    *   Input: A long t
+0.27.968.450 W split: context 130304, CPU takes 0 tokens in 0 of 8 layers; per step: CPU waited 0.0 ms for Q, attended 1.8 ms (8.1 GB/s), host blocked 1.5 ms
+0.31.660.023 W split: context 130304, CPU takes 0 tokens in 0 of 8 layers; per step: CPU waited 0.0 ms for Q, attended 0.0 ms (0.0 GB/s), host blocked 0.0 ms
+[17:30:28] fauto-t8-130000: restored: {"id_slot":0,"filename":"fill-131072-896-130000.bin","n_restored":130063,"n_read":1893115392,"timings":{"restore_ms":552.8}}
+{"label": "auto-130k-fauto-t8-130000", "prompt_tokens_requested": 130000, "start": "17:30:28", "prompt_n": 4, "prefill_tps": 8.58, "gen_n": 256, "decode_tps": 8.9, "text": "\n\n<think>\nThinking Process:\n\n1.  **Analyze the Request:**\n    *   Input: A long t
+0.27.794.184 W split: context 130304, CPU takes 167936 tokens in 8 of 8 layers; per step: CPU waited 0.1 ms for Q, attended 26.6 ms (7.5 GB/s), host blocked 25.1 ms
+0.31.052.541 W split: context 130304, CPU takes 167936 tokens in 8 of 8 layers; per step: CPU waited 0.1 ms for Q, attended 48.4 ms (6.9 GB/s), host blocked 46.9 ms
+[17:31:00] SWEEP DONE

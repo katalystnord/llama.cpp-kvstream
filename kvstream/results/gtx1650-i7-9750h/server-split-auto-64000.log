@@ -1,0 +1,35 @@
+0.00.108.761 I srv  llama_server: initializing ...
+0.00.108.773 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)
+0.00.109.125 W srv  llama_server: security: no API key is set and CORS allows all origins (see https://github.com/ggml-org/llama.cpp/pull/25655)
+0.00.111.526 I srv    load_model: loading model '~/code/kv-stream-brick/models/Qwen3.5-4B-Q4_K_M.gguf'
+0.02.109.493 W create: split attention on: CPU share of the streamed pages measured (auto), 6 threads
+0.02.155.383 W create: split attention on: CPU share of the streamed pages measured (auto), 6 threads
+0.02.156.223 W memory_phase: phase=prefill parent=939524096 compute=635726080 kv_pool=18304768 writer=280576 attention=285212672 persistent_kv=0 publication_stage=0 unused=0 reclaimed_compute=0 capture=external transition_us=0 arena_gen=1 kv_revision=1 resident_pages=3 ring_slots=8 active_pages=0 streaming=0 last_h2d_bytes=0 last_h2d_calls=0 copy_ms=0.000 elapsed_ms=0.000
+0.02.161.325 I cmn          init: llama threadpool init, n_threads = 6
+0.02.163.462 W KV_reload: bytes=4456448 calls=16 padded_rows=256 drain_us=1 upload_us=509 begin_us=39462638537 end_us=39462639057
+0.02.486.729 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 131072, kv_unified = 'false'
+0.02.491.232 I srv  llama_server: model loaded
+0.02.491.237 I srv  llama_server: listening on http://127.0.0.1:8099
+0.05.039.494 I slot load_slot_ch: id  0 | task -1 | restored 2 context checkpoint(s) from '~/code/kv-stream-brick/slots/probe-64000.bin'
+0.05.648.782 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, f_sim_best = 1.000 (> 0.100 thold), f_keep = 0.998
+0.05.648.977 I slot launch_slot_: id  0 | task 1 | processing task, is_child = 0
+0.05.979.869 W create: split attention on: CPU share of the streamed pages measured (auto), 6 threads
+0.05.982.460 W memory_phase: phase=decode parent=939524096 compute=5055232 kv_pool=933712896 writer=280576 attention=475392 persistent_kv=0 publication_stage=0 unused=0 reclaimed_compute=630670848 capture=external transition_us=2352 arena_gen=2 kv_revision=2 resident_pages=202 ring_slots=60 active_pages=251 streaming=1 last_h2d_bytes=1102100480 last_h2d_calls=932 copy_ms=0.000 elapsed_ms=0.000
+0.06.056.401 W KV_reload: bytes=900202496 calls=16 padded_rows=64256 drain_us=1 upload_us=73010 begin_us=39466458975 end_us=39466531995
+0.07.421.588 W split auto: share 0.00: 72.4 ms per token
+0.08.354.315 W split: context 64256, CPU takes 8960 tokens in 7 of 8 layers; per step: CPU waited 0.0 ms for Q, attended 1.0 ms (8.0 GB/s), host blocked 0.7 ms
+0.08.716.867 W split auto: share 0.10: 71.8 ms per token
+0.09.999.127 W split auto: share 0.20: 71.3 ms per token
+0.09.999.133 W split auto: settled at 0.00 (72.4 ms per token, 100352 streamed tokens)
+0.10.646.028 W split: context 64256, CPU takes 0 tokens in 0 of 8 layers; per step: CPU waited 0.1 ms for Q, attended 2.7 ms (10.1 GB/s), host blocked 2.2 ms
+0.12.956.836 W split: context 64256, CPU takes 0 tokens in 0 of 8 layers; per step: CPU waited 0.0 ms for Q, attended 0.0 ms (0.0 GB/s), host blocked 0.0 ms
+0.13.184.691 I slot print_timing: id  0 | task 1 | n_gen =    100, tg =  13.74 t/s, tg_3s =  13.88 t/s
+0.15.267.072 W split: context 64256, CPU takes 0 tokens in 0 of 8 layers; per step: CPU waited 0.0 ms for Q, attended 0.0 ms (0.0 GB/s), host blocked 0.0 ms
+0.16.220.040 I slot print_timing: id  0 | task 1 | n_gen =    142, tg =  13.77 t/s, tg_3s =  13.84 t/s
+0.17.450.560 I slot print_timing: id  0 | task 1 | prompt eval time =     329.50 ms /     4 tokens (   82.37 ms per token,    12.14 tokens per second)
+0.17.450.564 I slot print_timing: id  0 | task 1 |        eval time =   11472.06 ms /   159 tokens (   72.61 ms per token,    13.77 tokens per second)
+0.17.450.565 I slot print_timing: id  0 | task 1 |       total time =   11801.55 ms /   163 tokens
+0.17.450.569 I slot print_timing: id  0 | task 1 |    graphs reused =        158
+0.17.452.959 I slot      release: id  0 | task 1 | stop processing: n_tokens = 64236, truncated = 0
+0.17.477.975 I srv    operator(): operator(): cleaning up before exit...
+0.17.481.008 W ~llama_context:  CUDA_Host compute buffer size of   0.5549 MiB, does not match expectation of  74.2774 MiB

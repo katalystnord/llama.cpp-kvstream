@@ -1,0 +1,5 @@
+[17:32:36] fauto-t6-130000: restored: {"id_slot":0,"filename":"fill-131072-896-130000.bin","n_restored":130063,"n_read":1893115392,"timings":{"restore_ms":509.285}}
+{"label": "auto2-130k-fauto-t6-130000", "prompt_tokens_requested": 130000, "start": "17:32:36", "prompt_n": 4, "prefill_tps": 8.86, "gen_n": 256, "decode_tps": 9.51, "text": "\n\n<think>\nThinking Process:\n\n1.  **Analyze the Request:**\n    *   Input: A long
+0.25.294.725 W split: context 130304, CPU takes 278528 tokens in 8 of 8 layers; per step: CPU waited 0.1 ms for Q, attended 59.5 ms (7.8 GB/s), host blocked 58.6 ms
+0.28.776.174 W split: context 130304, CPU takes 278528 tokens in 8 of 8 layers; per step: CPU waited 0.1 ms for Q, attended 67.6 ms (6.9 GB/s), host blocked 66.7 ms
+[17:33:06] SWEEP DONE

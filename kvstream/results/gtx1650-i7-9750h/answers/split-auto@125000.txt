@@ -1,0 +1,5 @@
+**Question 1:**
+The code word for the beast test is **MARMALADE-7**.
+
+**Question 2:**
+The file `llama-context.cpp` implements the core logic for managing the `llama_context` structure in the llama.cpp inference engine. It handles the initialization of the context, including memory allocation, backend scheduling, and graph building for model execution. The code manages complex features like KV cache streaming, multi-token prediction (MTP), and speculative decoding. It also provides methods for encoding and decoding prompts, retrieving outputs (logits, embeddings), and handling state saving/loading. Additionally, it supports training operations and performance monitoring, ensuring efficient resource utilization across various hardware backends.

@@ -1,0 +1,567 @@
+From 30f491271bddff07eef452fed539dfb6bf8f2272 Mon Sep 17 00:00:00 2001
+From: David <david@katalystnord.com>
+Date: Thu, 29 Oct 2026 18:59:44 +0100
+Subject: [PATCH 2/6] ggml-cpu: flash attention LSE output and the
+ grouped-query decode path from beast
+
+Ported from the split attention series on beast (patches 0101, 0102, 0002 and
+v2 0005, 0006, 0008):
+- optional per-row log-sum-exp output of CPU flash attention
+  (ggml_flash_attn_ext_set_lse, in the private header ggml/src/ggml-fa-lse.h so
+  ggml.h and the CUDA objects do not change);
+- grouped-query decode: each K/V row read once for all query heads sharing it,
+  whole rows when the KV heads lie side by side in a row, blocks of 16 rows with
+  the V accumulators in registers, q8_0 K scores in batches and the softmax exp
+  8 rows at a time (AVX2).
+
+fa-cpu (one query, 16 heads over 4 KV heads of 256, q8_0 K, q4_0 V, 16K tokens,
+i7-9750H, 6 threads): 8.9 -> 13.0 GB/s.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ ggml/src/ggml-cpu/common.h   |   1 +
+ ggml/src/ggml-cpu/ggml-cpu.c |  21 +-
+ ggml/src/ggml-cpu/ops.cpp    | 406 +++++++++++++++++++++++++++++++++++
+ ggml/src/ggml-fa-lse.h       |  13 ++
+ 4 files changed, 440 insertions(+), 1 deletion(-)
+ create mode 100644 ggml/src/ggml-fa-lse.h
+
+diff --git a/ggml/src/ggml-cpu/common.h b/ggml/src/ggml-cpu/common.h
+index abbadc359..5c7eae2bb 100644
+--- a/ggml/src/ggml-cpu/common.h
++++ b/ggml/src/ggml-cpu/common.h
+@@ -8,6 +8,7 @@
+ 
+ #define GGML_FA_TILE_Q  64
+ #define GGML_FA_TILE_KV 64
++#define GGML_FA_GQA_BLOCK 16 // K/V rows per block of the grouped-query decode path (ops.cpp)
+ 
+ #ifdef __cplusplus
+ 
+diff --git a/ggml/src/ggml-cpu/ggml-cpu.c b/ggml/src/ggml-cpu/ggml-cpu.c
+index 7c274c03b..f2eb8e88d 100644
+--- a/ggml/src/ggml-cpu/ggml-cpu.c
++++ b/ggml/src/ggml-cpu/ggml-cpu.c
+@@ -2999,7 +2999,26 @@ struct ggml_cplan ggml_graph_plan(
+                         size_t n_chunks = n_tasks;
+                         size_t decode   = sizeof(float)*(neq2*n_chunks*(2+DV) + n_tasks*(DK + 2*DV));
+ 
+-                        cur += MAX(prefill, decode);
++                        // Grouped-query decode (ggml_compute_forward_flash_attn_ext_gqa): partials per (query row, query
++                        // head, chunk), at most 2*n_tasks chunks; per thread the f32 accumulators, M and S of a group's
++                        // query vectors, a V row and the query vectors converted for the K dot product
++                        // (a work item takes several KV heads when they lie side by side in a row: the most that
++                        // divide them with at most GGML_FA_GQA_MAX_NQ (64) query vectors, as in ops.cpp)
++                        // (and per KV head of the item a block of GGML_FA_GQA_BLOCK V rows in f32)
++                        const int64_t N    = node->src[0]->ne[1];
++                        const int64_t nek2 = MAX(node->src[1]->ne[2], 1);
++                        int64_t NQ = N*(neq2/nek2);
++                        int64_t G  = 1;
++                        for (int64_t g = nek2; g > 1; --g) {
++                            if (nek2 % g == 0 && NQ*g <= 64) {
++                                G = g;
++                                break;
++                            }
++                        }
++                        NQ *= G;
++                        size_t gqa = sizeof(float)*(N*neq2*2*n_tasks*(2+DV) + n_tasks*(NQ*(DV + 2 + DK) + G*GGML_FA_GQA_BLOCK*DV + CACHE_LINE_SIZE/sizeof(float)));
++
++                        cur += MAX(MAX(prefill, decode), gqa);
+                     } break;
+                 case GGML_OP_FLASH_ATTN_BACK:
+                     {
+diff --git a/ggml/src/ggml-cpu/ops.cpp b/ggml/src/ggml-cpu/ops.cpp
+index c7e7c47a7..74f9aa997 100644
+--- a/ggml/src/ggml-cpu/ops.cpp
++++ b/ggml/src/ggml-cpu/ops.cpp
+@@ -2,6 +2,7 @@
+ 
+ #include "ggml-cpu.h"
+ #include "ggml-impl.h"
++#include "ggml-fa-lse.h"
+ #include "binary-ops.h"
+ #include "simd-gemm.h"
+ #include "ggml.h"
+@@ -8839,6 +8840,15 @@ void ggml_compute_forward_top_k(
+     }
+ }
+ 
++// Optional per-row log-sum-exp output (op_params[GGML_FA_PARAM_LSE] holds a host pointer): for query row i1 of sequence i3 and head i2, lse[(i3*ne01 + i1)*ne02 + i2] = M + log(S), the max and the
++// sum of exp of the scaled, softcapped and masked logits (a sink is part of S). Results over disjoint K/V parts merge
++// exactly with it. Rows with no visible K/V get -inf.
++static float * ggml_flash_attn_ext_lse(const ggml_tensor * dst) {
++    float * lse = nullptr;
++    memcpy(&lse, dst->op_params + GGML_FA_PARAM_LSE, sizeof(lse));
++    return lse;
++}
++
+ static void ggml_compute_forward_flash_attn_ext_f16_one_chunk(
+         const ggml_compute_params * params,
+         ggml_tensor * dst,
+@@ -8852,6 +8862,7 @@ static void ggml_compute_forward_flash_attn_ext_f16_one_chunk(
+     const ggml_tensor * v     = dst->src[2];
+     const ggml_tensor * mask  = dst->src[3];
+     const ggml_tensor * sinks = dst->src[4];
++    float * const       lse   = ggml_flash_attn_ext_lse(dst);
+ 
+     GGML_TENSOR_LOCALS(int64_t, neq, q,   ne)
+     GGML_TENSOR_LOCALS(size_t,  nbq, q,   nb)
+@@ -9071,6 +9082,10 @@ static void ggml_compute_forward_flash_attn_ext_f16_one_chunk(
+             const int i2 = iq2;
+             const int i3 = iq3;
+ 
++            if (lse) {
++                lse[(i3*neq1 + i1)*neq2 + i2] = S == 0.0f ? -INFINITY : M + logf(S);
++            }
++
+             // permute(0, 2, 1, 3)
+             memcpy((char *) dst->data + (i3*ne2*ne1 + i2 + i1*ne1)*nb1, VKQ32, nb1);
+         }
+@@ -9086,6 +9101,7 @@ static void ggml_compute_forward_flash_attn_ext_tiled(
+     const ggml_tensor * v     = dst->src[2];
+     const ggml_tensor * mask  = dst->src[3];
+     const ggml_tensor * sinks = dst->src[4];
++    float * const       lse   = ggml_flash_attn_ext_lse(dst);
+ 
+     GGML_TENSOR_LOCALS(int64_t, neq, q,   ne)
+     GGML_TENSOR_LOCALS(size_t,  nbq, q,   nb)
+@@ -9357,6 +9373,10 @@ static void ggml_compute_forward_flash_attn_ext_tiled(
+             const int i2 = iq2;
+             const int i3 = iq3;
+ 
++            if (lse) {
++                lse[(i3*neq1 + i1)*neq2 + i2] = S[tq] == 0.0f ? -INFINITY : M[tq] + logf(S[tq]);
++            }
++
+             // permute(0, 2, 1, 3)
+             memcpy((char *) dst->data + (i3*ne2*ne1 + i2 + i1*ne1)*nb1, VKQ32 + tq * DV, nb1);
+         }
+@@ -9381,6 +9401,7 @@ static void ggml_flash_attn_ext_reduce_partials(
+     const int64_t DV        = v->ne[0];
+     const int64_t nek1      = k->ne[1];
+     const int64_t n_q_heads = q->ne[2];
++    float * const lse       = ggml_flash_attn_ext_lse(dst);
+ 
+     const int ith = params->ith;
+     const int nth = params->nth;
+@@ -9434,6 +9455,382 @@ static void ggml_flash_attn_ext_reduce_partials(
+         }
+         // iq1=0, iq3=0 for decode
+         memcpy((char *) dst->data + (0*ne2*ne1 + q_head + 0*ne1)*nb1, VKQ_final, nb1);
++        if (lse) {
++            lse[q_head] = S_final == 0.0f ? -INFINITY : M_final + logf(S_final);
++        }
++    }
++}
++
++// Decode with grouped-query attention (beast, 2026-10-28): one work item per (KV head, chunk of K/V) serves every
++// query head of the group and every query row at once, so each K row is read and each V row converted once instead of
++// once per query head (6 times for Qwen3.8). For few query rows (decode, drafts) over a long K/V; per-head paths
++// (one_chunk) read the same rows rk2 times. Partials per (row, query head, chunk) are merged at the end, which also
++// writes the LSE (ggml_flash_attn_ext_lse). The output accumulates in f32 for every V type.
++#define GGML_FA_GQA_MAX_NQ 64 // query vectors (query rows x query heads per KV head) a work item handles
++
++#if defined(__AVX2__)
++#include <immintrin.h>
++
++// Scores of a block of the grouped-query decode path, q8_0 K against q8_0 query vectors: out[j*ldo + t] = q_j . k_t
++// for nq query vectors (q_row bytes apart) and nt K rows (krow), nb blocks of 32 each. The arithmetic of
++// ggml_vec_dot_q8_0_q8_0 (AVX2) in the same order, but each 32-byte part of a K row is loaded once for up to 8 query
++// vectors held in registers, and there is no call per (row, query vector).
++static inline float ggml_fa_gqa_hsum_8(const __m256 x) {
++    __m128 res = _mm_add_ps(_mm256_extractf128_ps(x, 1), _mm256_castps256_ps128(x));
++    res = _mm_add_ps(res, _mm_movehl_ps(res, res));
++    res = _mm_add_ss(res, _mm_movehdup_ps(res));
++    return _mm_cvtss_f32(res);
++}
++
++static void ggml_fa_gqa_scores_q8_0(const char * const * krow, int64_t nt, const char * q, size_t q_row, int64_t nq,
++        int64_t nb, float * out, int64_t ldo) {
++    constexpr size_t bs = sizeof(ggml_fp16_t) + 32; // a q8_0 block: f16 scale, 32 int8
++    const __m256i ones = _mm256_set1_epi16(1);
++    for (int64_t j0 = 0; j0 < nq; j0 += 8) {
++        const int64_t jn = std::min<int64_t>(8, nq - j0);
++        for (int64_t t = 0; t < nt; ++t) {
++            __m256 acc[8];
++            for (int a = 0; a < 8; ++a) {
++                acc[a] = _mm256_setzero_ps();
++            }
++            for (int64_t b = 0; b < nb; ++b) {
++                const char *  kb = krow[t] + b*bs;
++                const float   dk = GGML_CPU_FP16_TO_FP32(*(const ggml_fp16_t *) kb);
++                const __m256i kx = _mm256_loadu_si256((const __m256i *) (kb + sizeof(ggml_fp16_t)));
++                const __m256i ax = _mm256_sign_epi8(kx, kx);
++                for (int a = 0; a < 8; ++a) {
++                    if (a < jn) {
++                        const char *  qb  = q + (j0 + a)*q_row + b*bs;
++                        const __m256i qy  = _mm256_loadu_si256((const __m256i *) (qb + sizeof(ggml_fp16_t)));
++                        const __m256i dot = _mm256_madd_epi16(ones, _mm256_maddubs_epi16(ax, _mm256_sign_epi8(qy, kx)));
++                        const __m256  d   = _mm256_set1_ps(dk*GGML_CPU_FP16_TO_FP32(*(const ggml_fp16_t *) qb));
++                        acc[a] = _mm256_fmadd_ps(d, _mm256_cvtepi32_ps(dot), acc[a]);
++                    }
++                }
++            }
++            for (int a = 0; a < jn; ++a) {
++                out[(j0 + a)*ldo + t] = ggml_fa_gqa_hsum_8(acc[a]);
++            }
++        }
++    }
++}
++#endif
++
++// KV heads a work item takes when they lie side by side in a row: the most that divide them and keep its query vectors
++// within GGML_FA_GQA_MAX_NQ (ggml_graph_plan sizes the work buffer the same way)
++static int64_t ggml_flash_attn_ext_gqa_heads_per_item(int64_t nq, int64_t n_head_kv) {
++    for (int64_t g = n_head_kv; g > 1; --g) {
++        if (n_head_kv % g == 0 && nq*g <= GGML_FA_GQA_MAX_NQ) {
++            return g;
++        }
++    }
++    return 1;
++}
++
++static int64_t ggml_flash_attn_ext_gqa_n_chunks(int64_t n_kv, int64_t n_head_kv, int nth) {
++    // about two items per thread, chunks of at least 256 K/V rows (at most 2*nth chunks: the work buffer is sized so)
++    const int64_t n = std::max<int64_t>(1, (2*nth + n_head_kv - 1)/n_head_kv);
++    return std::min<int64_t>(n, std::max<int64_t>(1, n_kv/256));
++}
++
++static void ggml_compute_forward_flash_attn_ext_gqa(
++        const ggml_compute_params * params,
++        ggml_tensor * dst) {
++    const ggml_tensor * q     = dst->src[0];
++    const ggml_tensor * k     = dst->src[1];
++    const ggml_tensor * v     = dst->src[2];
++    const ggml_tensor * mask  = dst->src[3];
++    const ggml_tensor * sinks = dst->src[4];
++    float * const       lse   = ggml_flash_attn_ext_lse(dst);
++
++    GGML_TENSOR_LOCALS(int64_t, neq, q,   ne)
++    GGML_TENSOR_LOCALS(size_t,  nbq, q,   nb)
++    GGML_TENSOR_LOCALS(int64_t, nek, k,   ne)
++    GGML_TENSOR_LOCALS(size_t,  nbk, k,   nb)
++    GGML_TENSOR_LOCALS(size_t,  nbv, v,   nb)
++    GGML_TENSOR_LOCALS(int64_t, ne,  dst, ne)
++    GGML_TENSOR_LOCALS(size_t,  nb,  dst, nb)
++
++    const int64_t DK  = nek0;
++    const int64_t DV  = v->ne[0];
++    const int64_t N   = neq1;
++    const int64_t rk2 = neq2/nek2;
++    const int64_t NQ  = N*rk2;
++    GGML_ASSERT(NQ <= GGML_FA_GQA_MAX_NQ);
++
++    float scale         = 1.0f;
++    float max_bias      = 0.0f;
++    float logit_softcap = 0.0f;
++
++    memcpy(&scale,         (float *) dst->op_params + 0, sizeof(float));
++    memcpy(&max_bias,      (float *) dst->op_params + 1, sizeof(float));
++    memcpy(&logit_softcap, (float *) dst->op_params + 2, sizeof(float));
++
++    if (logit_softcap != 0) {
++        scale /= logit_softcap;
++    }
++
++    const uint32_t n_head      = neq2;
++    const uint32_t n_head_log2 = 1u << (uint32_t) floor(log2(n_head));
++
++    const float m0 = powf(2.0f, -(max_bias       ) / n_head_log2);
++    const float m1 = powf(2.0f, -(max_bias / 2.0f) / n_head_log2);
++
++    ggml_type         const k_vec_dot_type = ggml_get_type_traits_cpu(k->type)->vec_dot_type;
++    ggml_from_float_t const q_to_vec_dot   = ggml_get_type_traits_cpu(k_vec_dot_type)->from_float;
++    ggml_vec_dot_t    const kq_vec_dot     = ggml_get_type_traits_cpu(k->type)->vec_dot;
++    ggml_to_float_t   const v_to_float     = v->type == GGML_TYPE_F32 ? nullptr : ggml_get_type_traits(v->type)->to_float;
++
++    const int ith = params->ith;
++    const int nth = params->nth;
++
++    // KV heads side by side in each row (a KV cache's rows): a work item takes as many of them as its query vectors
++    // allow (G KV heads, NQ*G query vectors, G dividing the KV heads), so that its thread reads whole rows, or the
++    // largest part of them, in order instead of a part of every row; 1.3x on a Ryzen 9 5900X for whole rows
++    int64_t G = 1;
++    if (nbk2 < nbk1 && nbv2 < nbv1) {
++        G = ggml_flash_attn_ext_gqa_heads_per_item(NQ, nek2);
++    }
++    const int64_t NQI = NQ*G;
++
++    const int64_t n_chunks   = ggml_flash_attn_ext_gqa_n_chunks(nek1, nek2/G, nth);
++    const int64_t chunk_size = (nek1 + n_chunks - 1)/n_chunks;
++    const int64_t psize      = 2 + DV; // a partial: [M, S, VKQ[DV]]
++    const size_t  q_row      = ggml_row_size(k_vec_dot_type, DK);
++
++    // work buffer: partials [row][query head][chunk], then per thread: VKQ [NQI][DV], M and S [NQI], a block of V rows
++    // converted to f32 for each KV head [G][GGML_FA_GQA_BLOCK][DV], Q rows
++    constexpr int64_t B = GGML_FA_GQA_BLOCK;
++    float * partials = (float *) params->wdata;
++    const int64_t per_thread = NQI*(DV + 2) + G*B*DV + (int64_t) ((NQI*q_row + sizeof(float) - 1)/sizeof(float)) + CACHE_LINE_SIZE_F32;
++    float * tw  = partials + N*neq2*n_chunks*psize + ith*per_thread;
++    float * VKQ = tw;
++    float * M   = VKQ + NQI*DV;
++    float * S   = M + NQI;
++    float * V32 = S + NQI;
++    char  * Q_q = (char *) (V32 + G*B*DV);
++
++    GGML_ASSERT(NQI <= GGML_FA_GQA_MAX_NQ);
++    float               slope[GGML_FA_GQA_MAX_NQ];
++    const ggml_fp16_t * mrow[GGML_FA_GQA_MAX_NQ];
++    float               P[GGML_FA_GQA_MAX_NQ][B];   // a block's scores, then its softmax weights
++#if defined(__AVX2__)
++    const bool scores_batched = k->type == GGML_TYPE_Q8_0 && k_vec_dot_type == GGML_TYPE_Q8_0 && DK % 32 == 0;
++#else
++    const bool scores_batched = false;
++#endif
++    const float *       vrow[GGML_FA_GQA_MAX_NQ*B]; // [KV head][row] V in f32, nullptr where every query masks the row
++
++    for (int64_t item = ith; item < (nek2/G)*n_chunks; item += nth) {
++        const int64_t ik20 = (item / n_chunks)*G; // first KV head
++        const int64_t c    = item % n_chunks;
++        const int64_t ic0 = c*chunk_size;
++        const int64_t ic1 = std::min(ic0 + chunk_size, nek1);
++
++        // query vector j: KV head ik20 + j / NQ, then row jj / rk2 and query head (KV head)*rk2 + jj % rk2 (jj = j % NQ)
++        for (int64_t j = 0; j < NQI; ++j) {
++            const int64_t iq1 = (j % NQ) / rk2;
++            const int64_t h   = (ik20 + j / NQ)*rk2 + (j % NQ) % rk2;
++            q_to_vec_dot((const float *) ((const char *) q->data + iq1*nbq1 + h*nbq2), Q_q + j*q_row, DK);
++            slope[j] = (max_bias > 0.0f) ? h < n_head_log2 ? powf(m0, h + 1) : powf(m1, 2*(h - n_head_log2) + 1) : 1.0f;
++            mrow[j]  = mask ? (const ggml_fp16_t *) ((const char *) mask->data + iq1*mask->nb[1] + (h % mask->ne[2])*mask->nb[2]) : nullptr;
++            M[j] = -INFINITY;
++            S[j] = 0.0f;
++        }
++        memset(VKQ, 0, NQI*DV*sizeof(float));
++
++        // blocks of B K/V rows: the scores of every query vector, one softmax rescale per block, then the V rows added
++        // with the accumulators of up to 8 query vectors held in registers (each V value loaded once for all of them)
++        for (int64_t ib = ic0; ib < ic1; ib += B) {
++            const int64_t nt = std::min(B, ic1 - ib);
++
++#if defined(__AVX2__)
++            // q8_0 K and query vectors: the block's scores of each KV head in one batch (masked ones are overwritten)
++            if (scores_batched) {
++                for (int64_t g = 0; g < G; ++g) {
++                    const char * krow[B];
++                    for (int64_t t = 0; t < nt; ++t) {
++                        krow[t] = (const char *) k->data + (ib + t)*nbk1 + (ik20 + g)*nbk2;
++                    }
++                    ggml_fa_gqa_scores_q8_0(krow, nt, Q_q + g*NQ*q_row, q_row, NQ, DK/32, &P[g*NQ][0], B);
++                }
++            }
++#endif
++            for (int64_t t = 0; t < nt; ++t) {
++                const int64_t ic = ib + t;
++                // the item's KV heads in row order
++                for (int64_t g = 0; g < G; ++g) {
++                    const int64_t ik2    = ik20 + g;
++                    const char *  k_data = (const char *) k->data + ic*nbk1 + ik2*nbk2;
++                    bool          seen   = false;
++                    for (int64_t j = g*NQ; j < (g + 1)*NQ; ++j) {
++                        const float mv = mrow[j] ? slope[j]*GGML_CPU_FP16_TO_FP32(mrow[j][ic]) : 0.0f;
++                        if (mv == -INFINITY) {
++                            P[j][t] = -INFINITY;
++                            continue;
++                        }
++                        float sv;
++                        if (scores_batched) {
++                            sv = P[j][t];
++                        } else {
++                            kq_vec_dot(DK, &sv, 0, k_data, 0, Q_q + j*q_row, 0, 1);
++                        }
++                        sv = sv*scale;
++                        if (logit_softcap != 0.0f) {
++                            sv = logit_softcap*tanhf(sv);
++                        }
++                        P[j][t] = sv + mv;
++                        seen    = true;
++                    }
++                    vrow[g*B + t] = nullptr;
++                    if (seen) {
++                        const char * v_data = (const char *) v->data + ic*nbv1 + ik2*nbv2;
++                        if (v_to_float) {
++                            v_to_float(v_data, V32 + (g*B + t)*DV, DV);
++                            vrow[g*B + t] = V32 + (g*B + t)*DV;
++                        } else {
++                            vrow[g*B + t] = (const float *) v_data;
++                        }
++                    }
++                }
++            }
++
++            // online softmax by block: rescale once to the block's new maximum, then the weights
++            for (int64_t j = 0; j < NQI; ++j) {
++                float bm = -INFINITY;
++                for (int64_t t = 0; t < nt; ++t) {
++                    bm = fmaxf(bm, P[j][t]);
++                }
++                if (bm == -INFINITY) {
++                    for (int64_t t = 0; t < nt; ++t) {
++                        P[j][t] = 0.0f;
++                    }
++                    continue;
++                }
++                if (bm > M[j]) {
++                    const float ms = expf(M[j] - bm); // 0 for the first visible block
++                    ggml_vec_scale_f32(DV, VKQ + j*DV, ms);
++                    S[j] *= ms;
++                    M[j]  = bm;
++                }
++                int64_t t = 0;
++#if defined(__AVX2__) && defined(__FMA__)
++                // 8 rows at a time (ggml_v_expf flushes -inf, a masked row, to 0)
++                const __m256 mj = _mm256_set1_ps(M[j]);
++                for (; t + 8 <= nt; t += 8) {
++                    const __m256 pv = ggml_v_expf(_mm256_sub_ps(_mm256_loadu_ps(&P[j][t]), mj));
++                    _mm256_storeu_ps(&P[j][t], pv);
++                    S[j] += ggml_fa_gqa_hsum_8(pv);
++                }
++#endif
++                for (; t < nt; ++t) {
++                    const float pv = P[j][t] == -INFINITY ? 0.0f : expf(P[j][t] - M[j]);
++                    P[j][t] = pv;
++                    S[j]   += pv;
++                }
++            }
++
++            // VKQ[j] += sum over t of P[j][t]*V[t], with the V rows of query vector j's KV head
++            for (int64_t g = 0; g < G; ++g) {
++                const float * const * vr = vrow + g*B;
++                for (int64_t j0 = g*NQ; j0 < (g + 1)*NQ; j0 += 8) {
++                    const int64_t jn = std::min<int64_t>(8, (g + 1)*NQ - j0);
++                    int64_t d = 0;
++#if defined(GGML_SIMD) && !defined(__ARM_FEATURE_SVE) && !defined(__riscv_v_intrinsic)
++                    for (; d + GGML_F32_EPR <= DV; d += GGML_F32_EPR) {
++                        GGML_F32_VEC acc[8];
++                        for (int64_t a = 0; a < 8; ++a) {
++                            acc[a] = a < jn ? GGML_F32_VEC_LOAD(VKQ + (j0 + a)*DV + d) : GGML_F32_VEC_ZERO;
++                        }
++                        for (int64_t t = 0; t < nt; ++t) {
++                            if (!vr[t]) {
++                                continue;
++                            }
++                            const GGML_F32_VEC vv = GGML_F32_VEC_LOAD(vr[t] + d);
++                            for (int64_t a = 0; a < 8; ++a) {
++                                if (a < jn) {
++                                    acc[a] = GGML_F32_VEC_FMA(acc[a], vv, GGML_F32_VEC_SET1(P[j0 + a][t]));
++                                }
++                            }
++                        }
++                        for (int64_t a = 0; a < 8; ++a) {
++                            if (a < jn) {
++                                GGML_F32_VEC_STORE(VKQ + (j0 + a)*DV + d, acc[a]);
++                            }
++                        }
++                    }
++#endif
++                    // leftover dims (all of them without fixed-width SIMD)
++                    for (; d < DV; ++d) {
++                        for (int64_t a = 0; a < jn; ++a) {
++                            float acc1 = VKQ[(j0 + a)*DV + d];
++                            for (int64_t t = 0; t < nt; ++t) {
++                                if (vr[t]) {
++                                    acc1 += P[j0 + a][t]*vr[t][d];
++                                }
++                            }
++                            VKQ[(j0 + a)*DV + d] = acc1;
++                        }
++                    }
++                }
++            }
++        }
++
++        for (int64_t j = 0; j < NQI; ++j) {
++            const int64_t iq1 = (j % NQ) / rk2;
++            const int64_t h   = (ik20 + j / NQ)*rk2 + (j % NQ) % rk2;
++            // sinks: once, with the first chunk
++            if (sinks && c == 0) {
++                const float sv = ((const float *) sinks->data)[h];
++                float ms = 1.0f;
++                float vs = 1.0f;
++                if (sv > M[j]) {
++                    ms = expf(M[j] - sv);
++                    M[j] = sv;
++                    ggml_vec_scale_f32(DV, VKQ + j*DV, ms);
++                } else {
++                    vs = expf(sv - M[j]);
++                }
++                S[j] = S[j]*ms + vs;
++            }
++            float * p = partials + ((iq1*neq2 + h)*n_chunks + c)*psize;
++            p[0] = M[j];
++            p[1] = S[j];
++            memcpy(p + 2, VKQ + j*DV, DV*sizeof(float));
++        }
++    }
++
++    ggml_barrier(params->threadpool);
++
++    // merge the chunks of each (row, query head)
++    for (int64_t it = ith; it < N*neq2; it += nth) {
++        const int64_t iq1 = it / neq2;
++        const int64_t h   = it % neq2;
++        float M_final = -INFINITY;
++        float S_final = 0.0f;
++        memset(VKQ, 0, DV*sizeof(float));
++        for (int64_t c = 0; c < n_chunks; ++c) {
++            const float * p = partials + ((iq1*neq2 + h)*n_chunks + c)*psize;
++            if (p[1] == 0.0f) {
++                continue;
++            }
++            const float M_new     = fmaxf(M_final, p[0]);
++            const float scale_old = expf(M_final - M_new);
++            const float scale_new = expf(p[0] - M_new);
++            for (int64_t d = 0; d < DV; ++d) {
++                VKQ[d] = VKQ[d]*scale_old + p[2 + d]*scale_new;
++            }
++            S_final = S_final*scale_old + p[1]*scale_new;
++            M_final = M_new;
++        }
++        if (S_final != 0.0f) {
++            ggml_vec_scale_f32(DV, VKQ, 1.0f/S_final);
++        }
++        // permute(0, 2, 1, 3)
++        memcpy((char *) dst->data + (h + iq1*ne1)*nb1, VKQ, nb1);
++        if (lse) {
++            lse[iq1*neq2 + h] = S_final == 0.0f ? -INFINITY : M_final + logf(S_final);
++        }
+     }
+ }
+ 
+@@ -9488,6 +9885,15 @@ static void ggml_compute_forward_flash_attn_ext_f16(
+     const bool kv_is_f32_or_f16 = (k->type == GGML_TYPE_F32 || k->type == GGML_TYPE_F16);
+     const bool use_split_kv_path = !use_ref && (neq1 == 1 && neq3 == 1) && kv_is_f32_or_f16 && (k->type == v->type) && q->type == GGML_TYPE_F32 && nek1 >= 512;
+ 
++    // grouped-query decode: few query rows, query heads sharing a KV head, a long K/V
++    const bool use_gqa_path = !use_ref && neq3 == 1 && nek3 == 1 && nev3 == 1 && nek2 > 0 && neq2 % nek2 == 0 &&
++        neq2/nek2 > 1 && nev2 == nek2 && neq1*(neq2/nek2) <= GGML_FA_GQA_MAX_NQ && nek1 >= 512 &&
++        q->type == GGML_TYPE_F32 && (v->type == GGML_TYPE_F32 || ggml_get_type_traits(v->type)->to_float);
++    if (use_gqa_path) {
++        ggml_compute_forward_flash_attn_ext_gqa(params, dst);
++        return;
++    }
++
+     if (use_split_kv_path) {
+         const int64_t chunk_size = (nek1 + nth - 1) / nth;
+ 
+diff --git a/ggml/src/ggml-fa-lse.h b/ggml/src/ggml-fa-lse.h
+new file mode 100644
+index 000000000..c199f3f26
+--- /dev/null
++++ b/ggml/src/ggml-fa-lse.h
+@@ -0,0 +1,13 @@
++#pragma once
++
++#include "ggml.h"
++
++#include <string.h>
++
++// GGML_OP_FLASH_ATTN_EXT op_params 6-7: optional per-row log-sum-exp output (host pointer, CPU kernels only).
++// lse[token*n_head + head] = log(sum(exp(scale*q.k + mask))), so that results over disjoint K/V merge exactly.
++#define GGML_FA_PARAM_LSE 6
++
++static inline void ggml_flash_attn_ext_set_lse(struct ggml_tensor * a, float * lse) {
++    memcpy(a->op_params + GGML_FA_PARAM_LSE, &lse, sizeof(lse));
++}
+-- 
+2.53.0
+

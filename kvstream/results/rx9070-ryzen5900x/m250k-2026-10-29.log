@@ -1,0 +1,13 @@
+== Qwen3.8 250K, q8 V, MTP drafting: no split, auto
+  {"label": "fill@250000", "prompt_tokens": 250068, "wall_s": 776.3, "prefill_tps": 330.1, "decode_tps": 12.1, "draft": "151/288", "needle_found": true, 
+  [2026-10-29 17:47:14] saved: {"id_slot":0,"filename":"split-sweep-sha256-d847e2c1e4aa276e4-250000.bin","n_saved":250302,"n_written":10298268512,"timings":{"save_ms":34671.073}}
+  {"label": "f0-t0", "prompt_tokens": 250068, "wall_s": 19.6, "prefill_tps": 5.8, "decode_tps": 12.0, "draft": "151/288", "needle_found": true, 
+  {"label": "fauto-t16", "prompt_tokens": 250068, "wall_s": 25.3, "prefill_tps": 6.8, "decode_tps": 9.2, "draft": "151/288", "needle_found": true, 
+  llama_kv_stream: split auto: share 0.00: 61.2 ms per token
+  llama_kv_stream: split auto: share 0.10: 86.6 ms per token
+  llama_kv_stream: split auto: settled at 0.00 (61.2 ms per token, 795 streamed pages)
+== Saluki 250K, no drafting: no split, auto, 0.3
+  [2026-10-29 17:58:28] saved: 
+  {"label": "f0-t0", "prompt_tokens": 250068, "wall_s": 824.8, "prefill_tps": 315.9, "decode_tps": 3.9, "draft": "None/None", "needle_found": true, 
+  {"label": "f0.3-t16", "prompt_tokens": 250068, "wall_s": 815.8, "prefill_tps": 316.0, "decode_tps": 5.3, "draft": "None/None", "needle_found": true, 
+M250K DONE

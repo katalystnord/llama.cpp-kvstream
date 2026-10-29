@@ -1,0 +1,11 @@
+[2026-10-29 19:52:04] spill2-64000 up: 19:52:02,3712,27.53,1875,49,0x0000000000000000,1050,9920
+{"label": "unified@64000", "prompt_tokens": 64067, "wall_s": 762.6, "prefill_tps": 90.0, "decode_tps": 3.1, "draft": "None/None", "needle_found": true}
+[2026-10-29 20:04:57] spill2-125000 up: 20:04:55,3712,29.27,1845,62,0x0000000000000000,1050,10986
+[2026-10-29 20:34:57] unified@125000: no answer (timeout 1800 s or error)
+[2026-10-29 20:35:15] spill1-32000 up: 20:35:13,2666,22.71,1845,59,0x0000000000000000,2453,7227
+{"label": "nkvo@32000", "prompt_tokens": 32069, "wall_s": 289.0, "prefill_tps": 119.1, "decode_tps": 8.5, "draft": "None/None", "needle_found": true}
+[2026-10-29 20:40:13] spill1-64000 up: 20:40:11,2666,23.37,1845,62,0x0000000000000000,2777,7498
+{"label": "nkvo@64000", "prompt_tokens": 64067, "wall_s": 766.8, "prefill_tps": 87.1, "decode_tps": 5.4, "draft": "None/None", "needle_found": true}
+[2026-10-29 20:53:08] spill1-125000 up: 20:53:06,2666,23.33,1845,62,0x0000000000000000,2878,7661
+[2026-10-29 21:23:08] nkvo@125000: no answer (timeout 1800 s or error)
+[2026-10-29 21:23:18] MEASURE DONE: spill2 spill1

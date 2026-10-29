@@ -1,0 +1,233 @@
+From 23c6b8ff1c86698b789d1eab5ae8b6700371036a Mon Sep 17 00:00:00 2001
+From: David <david@katalystnord.com>
+Date: Thu, 29 Oct 2026 18:59:44 +0100
+Subject: [PATCH 5/6] kv-stream: LLAMA_KV_SPLIT=auto, the CPU's share found by
+ measuring; LLAMA_KV_SPLIT_NOOP
+
+Beast's tuner: from share 0 a step of 0.1 is kept when decode steps get at least
+2% faster (windows of 16 steps, the first two after a change skipped, steps
+slower than three times the median left out); it settles and looks again after
+512 steps or when the streamed part changes by a quarter. Nothing splits while
+nothing streams. Two changes for this fork:
+- the resident binding is rebuilt at every KV layout change (about every 60
+  tokens at 130K), so the tuner state lives outside it;
+- from 0, when 0.1 does not pay, 0.2 is tried once: a small share does not cover
+  the split's fixed cost (130K: 113.1 ms per token at 0, 111.7 at 0.1, 103.6 at
+  0.2).
+
+130K: settles at 0.3 to 0.5 (8.55 -> 9.5 t/s over 256 tokens); 64K without
+streaming: never splits. LLAMA_KV_SPLIT_NOOP (measuring only, output wrong) skips
+the CPU's part to show the most the split could give.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/llama-kv-stream-resident.cpp | 130 +++++++++++++++++++++++++++++--
+ 1 file changed, 123 insertions(+), 7 deletions(-)
+
+diff --git a/src/llama-kv-stream-resident.cpp b/src/llama-kv-stream-resident.cpp
+index c81f0b221..c84c6481d 100644
+--- a/src/llama-kv-stream-resident.cpp
++++ b/src/llama-kv-stream-resident.cpp
+@@ -46,7 +46,7 @@ struct resident_split {
+ 
+     float fraction = 0.0f;
+     int threads = 0;
+-    bool debug = false, verify = false;
++    bool debug = false, verify = false, noop = false;
+     float * checked = nullptr;
+     double verify_max = 0.0, verify_sum = 0.0;
+     int64_t verify_count = 0;
+@@ -67,6 +67,27 @@ struct resident_split {
+ 
+     int64_t t_wait = 0, t_attend = 0, t_block = 0, n_layers = 0, n_bytes = 0, n_steps = 0;
+ 
++    // LLAMA_KV_SPLIT=auto: hill climbing on the time per decode step, in windows of 16 steps
++    struct tuner_state {
++        bool on = false;
++        int phase = 0;           // 0: measure the base share, 1: measure a probe, 2: settled
++        float base = 0.0f, probe = 0.0f, dir = 1.0f;
++        bool turned = false;     // the other direction was tried
++        bool ahead = false;      // a probe two steps away was tried after one step did not pay
++        double t_base = 0.0;     // us per step at the base share
++        int skip = 2;            // steps not counted after a change
++        uint32_t settled = 0;    // steps since settling
++        size_t streamed = 0;     // streamed tokens when settled
++        std::vector<int64_t> samples;
++        int64_t t_last = 0;      // start of the previous decode step, 0 after a step that was not one
++    };
++    // The binding (and this object) is rebuilt at every KV layout change, so the tuner lives outside it.
++    static tuner_state & shared_tuner() {
++        static tuner_state state;
++        return state;
++    }
++    tuner_state & tuner = shared_tuner();
++
+     ~resident_split() {
+         {
+             std::lock_guard<std::mutex> lock(mutex);
+@@ -80,11 +101,12 @@ struct resident_split {
+     static std::unique_ptr<resident_split> create(ggml_backend_t backend, const ggml_kv_stream_shape & shape, size_t tokens) {
+         const char * value = std::getenv("LLAMA_KV_SPLIT");
+         if (!value) return {};
+-        const float fraction = std::strtof(value,nullptr);
++        const bool tune = std::strcmp(value,"auto") == 0;
++        const float fraction = tune ? 0.0f : std::strtof(value,nullptr);
+         // LLAMA_KV_SPLIT_VERIFY: compare every decode layer's output with CPU attention over the whole context.
+         const bool verify = std::getenv("LLAMA_KV_SPLIT_VERIFY") != nullptr;
+-        if (!(fraction > 0.0f && fraction < 1.0f) && !(verify && fraction == 0.0f)) {
+-            LLAMA_LOG_WARN("%s: LLAMA_KV_SPLIT=%s is not a fraction in (0, 1), split attention off\n", __func__, value);
++        if (!tune && !(fraction > 0.0f && fraction < 1.0f) && !(verify && fraction == 0.0f)) {
++            LLAMA_LOG_WARN("%s: LLAMA_KV_SPLIT=%s is not auto or a fraction in (0, 1), split attention off\n", __func__, value);
+             return {};
+         }
+         auto * dev = ggml_backend_get_device(backend);
+@@ -97,7 +119,10 @@ struct resident_split {
+         }
+         auto result = std::make_unique<resident_split>();
+         result->fraction = fraction;
++        result->tuner.on = tune;
+         result->verify = verify;
++        // LLAMA_KV_SPLIT_NOOP, for measuring only: the CPU's part is skipped and empty, so the output is WRONG
++        result->noop = std::getenv("LLAMA_KV_SPLIT_NOOP") != nullptr;
+         result->ops = get();
+         const char * threads = std::getenv("LLAMA_KV_SPLIT_THREADS");
+         result->threads = threads ? std::atoi(threads) : int(std::max(1u,std::thread::hardware_concurrency()*2/3));
+@@ -117,7 +142,9 @@ struct resident_split {
+         result->lse = reinterpret_cast<float *>(base+offset); offset += align(64*sizeof(float));
+         result->checked = reinterpret_cast<float *>(base+offset); offset += align(result->q_capacity*sizeof(float));
+         result->mask = reinterpret_cast<ggml_fp16_t *>(base+offset);
+-        LLAMA_LOG_WARN("%s: split attention on: CPU share %.2f of the streamed pages, %d threads\n", __func__, fraction, result->threads);
++        if (tune) LLAMA_LOG_WARN("%s: split attention on: CPU share of the streamed pages measured (auto), %d threads\n", __func__, result->threads);
++        else LLAMA_LOG_WARN("%s: split attention on: CPU share %.2f of the streamed pages, %d threads\n", __func__, fraction, result->threads);
++        if (result->noop) LLAMA_LOG_WARN("%s: LLAMA_KV_SPLIT_NOOP: the CPU's part is skipped, results are wrong (measuring only)\n", __func__);
+         return result;
+     }
+ 
+@@ -172,6 +199,12 @@ struct resident_split {
+         const int64_t t0 = ggml_time_us();
+         if (!ops->wait(item.fetched)) return false;
+         const int64_t t1 = ggml_time_us();
++        if (noop) {
++            // empty part (LSE -inf): the merge keeps the GPU's part only
++            std::fill(values,values+size_t(item.heads)*size_t(item.dim_v),0.0f);
++            std::fill(lse,lse+item.heads,-INFINITY);
++            return true;
++        }
+         const ggml_init_params params = {8*ggml_tensor_overhead() + ggml_graph_overhead_custom(8,false), nullptr, true};
+         ggml_context_ptr ctx{ggml_init(params)};
+         if (!ctx) return false;
+@@ -204,6 +237,78 @@ struct resident_split {
+         return true;
+     }
+ 
++    // LLAMA_KV_SPLIT=auto (beast's tuner): the share for the coming decode step. The time since the previous decode step
++    // started counts for the share that step used. A window's time is its mean over 16 steps after two skipped, without
++    // steps slower than three times the median. From share 0, a step of 0.1 is kept when at least 2% faster; it settles,
++    // then looks again after 512 steps or when the streamed tokens change by a quarter. Nothing streams: no split.
++    float share(size_t streamed) {
++        auto & t = tuner;
++        const int64_t now = ggml_time_us();
++        const bool counted = t.t_last && streamed;
++        if (counted) {
++            if (t.skip > 0) --t.skip;
++            else t.samples.push_back(now-t.t_last);
++        }
++        t.t_last = now;
++        if (!streamed) return 0.0f;
++        const float current = t.phase == 1 ? t.probe : t.base;
++        if (t.phase == 2) {
++            if ((counted && ++t.settled >= 512) || streamed > t.streamed+t.streamed/4 || streamed+streamed/4 < t.streamed) {
++                if (debug) LLAMA_LOG_WARN("split auto: again after %u steps, %zu streamed tokens (settled with %zu)\n",
++                    t.settled, streamed, t.streamed);
++                t.phase = 0; t.samples.clear(); t.skip = 2; t.turned = false; t.ahead = false;
++            }
++            return t.base;
++        }
++        constexpr size_t window = 16;
++        constexpr float step = 0.1f;
++        if (t.samples.size() < window) return current;
++        std::vector<int64_t> sorted = t.samples;
++        std::nth_element(sorted.begin(),sorted.begin()+window/2,sorted.end());
++        const int64_t median = sorted[window/2];
++        int64_t sum = 0, n = 0;
++        for (auto item : t.samples) if (item <= 3*median) { sum += item; ++n; }
++        const double mean = double(sum)/double(std::max<int64_t>(n,1));
++        t.samples.clear(); t.skip = 2;
++        if (debug) LLAMA_LOG_WARN("split auto: share %.2f: %.1f ms per token\n", current, mean/1e3);
++        const auto settle = [&] {
++            t.phase = 2; t.settled = 0; t.streamed = streamed;
++            if (debug) LLAMA_LOG_WARN("split auto: settled at %.2f (%.1f ms per token, %zu streamed tokens)\n", t.base, t.t_base/1e3, streamed);
++            return t.base;
++        };
++        const auto try_probe = [&] {
++            const float p = std::clamp(t.base+t.dir*step,0.0f,0.9f);
++            if (std::fabs(p-t.base) < 1e-3f) return false;
++            t.probe = p; t.phase = 1;
++            return true;
++        };
++        if (t.phase == 0) {
++            t.t_base = mean;
++            if (try_probe()) return t.probe;
++            t.dir = -t.dir;
++            return try_probe() ? t.probe : settle();
++        }
++        // a probe: keep it if at least 2% faster and go on in the same direction
++        if (mean < 0.98*t.t_base) {
++            t.base = t.probe; t.t_base = mean; t.turned = true; t.ahead = false;
++            return try_probe() ? t.probe : settle();
++        }
++        // from no split, one step may not cover the split's fixed cost: try two steps once before giving up
++        if (!t.ahead && t.base == 0.0f && std::fabs(t.probe-t.base) < 1.5f*step) {
++            t.ahead = true;
++            const float p = std::clamp(t.base+2.0f*t.dir*step,0.0f,0.9f);
++            if (std::fabs(p-t.probe) > 1e-3f) {
++                t.probe = p;
++                return t.probe;
++            }
++        }
++        if (!t.turned) {
++            t.turned = true; t.ahead = false; t.dir = -t.dir;
++            if (try_probe()) return t.probe;
++        }
++        return settle();
++    }
++
+     void report(const std::vector<size_t> & split, size_t padded) {
+         if (!debug || ++n_steps % 32) return;
+         if (verify && verify_count) {
+@@ -708,7 +813,10 @@ bool llama_kv_stream_resident::begin_sequence(const std::vector<uint32_t> & laye
+             seq->profile |= !feedback_context.read_only && feedback_context.decode && seq->queries == 1 && prefixes.back() < immutable;
+         }
+         seq->split_tokens.assign(layers.size(),0);
+-        if (s.split && s.split->heads && seq->decode && seq->queries == 1 && !seq->read_only && s.resumed_decode && !s.fallback) {
++        const bool split_step = s.split && s.split->heads && seq->decode && seq->queries == 1 && !seq->read_only &&
++            s.resumed_decode && !s.fallback;
++        if (s.split && !split_step) s.split->tuner.t_last = 0;
++        if (split_step) {
+             ggml_kv_stream_resume_plan plan;
+             const auto * ops = partial_ops();
+             const bool vector = ggml_kv_stream_resume_plan_query(ops,s.backend,{s.binding.config.shape,s.split->heads,1,seq->padded},plan) &&
+@@ -716,11 +824,19 @@ bool llama_kv_stream_resident::begin_sequence(const std::vector<uint32_t> & laye
+                 std::all_of(std::begin(plan.kernel_config),std::end(plan.kernel_config),[](uint32_t item) { return item == 0; });
+             // The CPU takes the oldest streamed pages, never rows written in this step, and leaves the GPU at least one page.
+             const size_t page = s.page.tokens, immutable = stable/page*page;
++            float fraction = s.split->fraction;
++            if (s.split->tuner.on) {
++                size_t streamed = 0;
++                for (size_t i = 0; vector && i < layers.size(); ++i) {
++                    if (prefixes[i] && prefixes[i] < seq->padded && immutable > prefixes[i]) streamed += seq->padded-prefixes[i];
++                }
++                fraction = s.split->share(streamed);
++            }
+             for (size_t i = 0; vector && i < layers.size(); ++i) {
+                 const size_t prefix = prefixes[i];
+                 if (!prefix || prefix >= seq->padded || immutable <= prefix) continue;
+                 const size_t streamed = seq->padded-prefix;
+-                size_t tokens = size_t(double(s.split->fraction)*double(streamed))/page*page;
++                size_t tokens = size_t(double(fraction)*double(streamed))/page*page;
+                 tokens = std::min({tokens,immutable-prefix,streamed-page,s.split->mask_capacity});
+                 seq->split_tokens[i] = tokens;
+                 prefixes[i] += tokens;
+-- 
+2.53.0
+

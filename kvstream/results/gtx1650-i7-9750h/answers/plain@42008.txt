@@ -1,0 +1,3 @@
+Question 1: MARMALADE-7
+
+Question 2: The file `llama-context.cpp` implements the `llama_context` class, which manages the runtime execution state for LLM inference in llama.cpp. It initializes GPU backends, allocates memory for KV caches, and handles complex memory management strategies like KV streaming, MTP (Multi-Token Prediction), and serial features. The code dynamically resolves fused operations (e.g., Flash Attention, Gated Delta Net) based on hardware support and model architecture. It orchestrates graph building, scheduling, and asynchronous computation across multiple devices, while also handling output buffering, sampling, and synchronization to ensure efficient and correct inference performance.

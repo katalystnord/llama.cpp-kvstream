@@ -4,7 +4,7 @@
 # at that depth. Settings: "fraction:threads" (0:0 = no split). LLAMA_KV_SPLIT_DEBUG prints where the CPU worker's
 # time goes. Default: Saluki, pool 2420 MiB, no drafting, as run-split.sh; MODEL, TEMPLATE and SPEC select another
 # model and drafting (the slot file is named after the model and depth).
-# Usage: SALUKI_DIR=... | MODEL=... SLOTS=dir [DEPTH=150000] [CONFIGS="0:0 0.2:8 ..."] run-split-sweep.sh   Log: stdout
+# Usage: SALUKI_DIR=... | MODEL=... SLOTS=dir [DEPTH=150000] [CTX=163840] [CONFIGS="0:0 0.2:8 ..."] run-split-sweep.sh   Log: stdout
 N=$(cd "$(dirname "$0")" && pwd); R=$(cd "$N/../.." && pwd)
 [ -n "$MODEL" ] || MODEL=${SALUKI_DIR:?set SALUKI_DIR to the folder holding Underdog-Saluki-27B-1.0-IQ2-mix.gguf, or MODEL}/Underdog-Saluki-27B-1.0-IQ2-mix.gguf
 SLOTS=${SLOTS:?set SLOTS to a folder with room for the slot file (about 5 GB at 150K)}
@@ -20,7 +20,7 @@ start() {  # name fraction threads
   # the previous server's unit must be gone, or systemd-run refuses the name (and a stray server answers instead)
   local w=0; while systemctl --user list-units --all -q 'kvs-sweep.scope' | grep -q kvs-sweep; do sleep 1; w=$((w+1)); [ $w -gt 60 ] && { say "$1: previous server still there"; return 1; }; done
   if [ "$2" = 0 ]; then unset LLAMA_KV_SPLIT; else export LLAMA_KV_SPLIT=$2 LLAMA_KV_SPLIT_THREADS=$3; fi
-  systemd-run --user --scope -q --unit=kvs-sweep "$R/kvstream/scripts/serve-long.sh" 163840 8099 --slot-save-path "$SLOTS" \
+  systemd-run --user --scope -q --unit=kvs-sweep "$R/kvstream/scripts/serve-long.sh" ${CTX:-163840} 8099 --slot-save-path "$SLOTS" \
     > "$N/server-sweep-$1.log" 2>&1 </dev/null &
   until [ "$(curl -s -m 3 -o /dev/null -w '%{http_code}' http://127.0.0.1:8099/health)" = 200 ]; do
     systemctl --user is-active -q kvs-sweep.scope || { say "$1: server exited"; tail -5 "$N/server-sweep-$1.log"; return 1; }

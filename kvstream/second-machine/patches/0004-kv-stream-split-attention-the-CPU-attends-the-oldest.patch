@@ -1,0 +1,576 @@
+From 6a5d93a3b09a57bfa6d0a798d0771f654582fdc1 Mon Sep 17 00:00:00 2001
+From: David <david@katalystnord.com>
+Date: Thu, 29 Oct 2026 18:59:44 +0100
+Subject: [PATCH 4/6] kv-stream: split attention, the CPU attends the oldest
+ streamed pages in place
+
+LLAMA_KV_SPLIT=<fraction> (off by default): in single-token decode steps the CPU
+takes that share of each layer's streamed pages, the oldest ones after the
+resident prefix, and attends over them in the host store; those pages are not
+copied. Per layer the host fetches Q and the mask slice (cudaMemcpyAsync and an
+event), a worker thread runs ggml's CPU flash attention with its LSE while the GPU
+attends over the rest, and the GPU merges the CPU's output into the resumed vector
+result (split ops: fetch, wait, merge). Only when pages stream and the resume plan
+is the vector kernel; otherwise nothing changes.
+
+LLAMA_KV_SPLIT_THREADS (default two thirds of the hardware threads),
+LLAMA_KV_SPLIT_DEBUG (timings every 32 steps), LLAMA_KV_SPLIT_VERIFY (compares
+every decode layer with CPU attention over the whole context).
+
+Qwen3.5 4B at 130K on brick (q8_0 K, q4_0 V): 8.66 -> 10.15 t/s at 0.5 with 6
+threads; 0.7 is slower than no split. Verify at 130K: mean |diff| 5.22e-5 with the
+split against 5.36e-5 without.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ ggml/src/ggml-cuda/ggml-cuda.cu          |   1 +
+ ggml/src/ggml-cuda/kv-stream-partial.cu  |  70 ++++++
+ ggml/src/ggml-cuda/kv-stream-partial.cuh |   3 +
+ ggml/src/ggml-kv-stream-split.h          |  19 ++
+ src/llama-kv-stream-resident.cpp         | 289 ++++++++++++++++++++++-
+ 5 files changed, 378 insertions(+), 4 deletions(-)
+ create mode 100644 ggml/src/ggml-kv-stream-split.h
+
+diff --git a/ggml/src/ggml-cuda/ggml-cuda.cu b/ggml/src/ggml-cuda/ggml-cuda.cu
+index d5e5860e6..324981fde 100644
+--- a/ggml/src/ggml-cuda/ggml-cuda.cu
++++ b/ggml/src/ggml-cuda/ggml-cuda.cu
+@@ -6322,6 +6322,7 @@ static void * ggml_backend_cuda_reg_get_proc_address(ggml_backend_reg_t reg, con
+     if (strcmp(name, "ggml_backend_kv_stream_partial_ops") == 0) return (void *)ggml_cuda_kv_stream_partial_ops;
+     if (strcmp(name, "ggml_backend_cuda_kv_stream_attention_plan") == 0) return (void *)ggml_cuda_kv_stream_attention_plan_query;
+     if (strcmp(name, "ggml_backend_kv_stream_copy_ops") == 0) return (void *)ggml_cuda_kv_stream_copy_ops;
++    if (strcmp(name, "ggml_backend_kv_stream_split_ops") == 0) return (void *)ggml_cuda_kv_stream_split_ops;
+     if (strcmp(name, "ggml_backend_cuda_kv_host_buffer_type") == 0) return (void *)ggml_backend_cuda_kv_host_buffer_type;
+     if (strcmp(name, "ggml_backend_cuda_kv_host_buffer_register") == 0) return (void *)ggml_backend_cuda_kv_host_buffer_register;
+     const bool release_graph = strcmp(name, "ggml_backend_cuda_graph_release") == 0;
+diff --git a/ggml/src/ggml-cuda/kv-stream-partial.cu b/ggml/src/ggml-cuda/kv-stream-partial.cu
+index e0e117553..4210507db 100644
+--- a/ggml/src/ggml-cuda/kv-stream-partial.cu
++++ b/ggml/src/ggml-cuda/kv-stream-partial.cu
+@@ -1352,6 +1352,30 @@ static bool fold(ggml_backend_t backend, ggml_tensor * output, ggml_backend_buff
+ static bool clear(ggml_backend_t backend, ggml_tensor * output, ggml_backend_buffer_t buffer, bool second) {
+     return combine(backend,output,buffer,second ? 3 : 2);
+ }
++
++// Merge a part attended elsewhere (normalized values, LSE) into the finished vector resume output.
++// The vector splits' (max, sum) stay in the workspace after the combine, so they give the GPU part's LSE.
++__global__ void split_merge_kernel(float * dst, const float2 * meta, int splits, const float * values, const float * lse) {
++    const size_t row = blockIdx.x;
++    const int tid = threadIdx.x;
++    __shared__ float weights[2];
++    if (tid == 0) {
++        const float2 * m = meta + row*splits;
++        float maximum = -INFINITY;
++        for (int i = 0; i < splits; ++i) maximum = fmaxf(maximum, m[i].x);
++        float sum = 0.0f;
++        for (int i = 0; i < splits; ++i) sum += m[i].y > 0.0f ? expf(m[i].x - maximum)*m[i].y : 0.0f;
++        const float own = sum > 0.0f ? maximum + logf(sum) : -INFINITY;
++        const float other = lse[row];
++        const float top = fmaxf(own, other);
++        const float a = own == -INFINITY ? 0.0f : expf(own - top);
++        const float b = other == -INFINITY ? 0.0f : expf(other - top);
++        weights[0] = a/(a + b);
++        weights[1] = b/(a + b);
++    }
++    __syncthreads();
++    dst[row*256 + tid] = weights[0]*dst[row*256 + tid] + weights[1]*values[row*256 + tid];
++}
+ } // namespace
+ 
+ // Describe owned workspace without inspecting payloads; stock backend-pool/launch details stay explicitly unknown.
+@@ -1385,6 +1409,52 @@ ggml_cuda_kv_stream_plan_status ggml_cuda_kv_stream_attention_plan_query(
+     return ggml_cuda_kv_stream_attention_plan_make(metadata, family, style, support, requirements, output);
+ }
+ 
++static bool split_merge(ggml_backend_t backend, ggml_tensor * output, ggml_backend_buffer_t workspace,
++        const ggml_kv_stream_resume_plan & plan, const float * values, const float * lse) {
++    if (!backend || !ggml_backend_is_cuda(backend) || capture_active(backend) || !output || !workspace || !values || !lse ||
++            output->type != GGML_TYPE_F32 || output->ne[0] != 256 || !ggml_is_contiguous(output) ||
++            output->ne[1] != plan.heads || output->ne[2] != plan.queries || output->ne[3] != 1 || plan.splits < 2 ||
++            plan.resume_resident || plan.span_resume) return false;
++    for (auto item : plan.kernel_config) if (item) return false;
++    auto & ctx = *static_cast<ggml_backend_cuda_context *>(backend->context);
++    const auto base = uintptr_t(ggml_backend_buffer_get_base(workspace));
++    if (ggml_backend_buffer_get_type(workspace) != ggml_backend_cuda_device_buffer_type(ctx.device) ||
++            !base || ggml_backend_buffer_get_size(workspace) < plan.bytes) return false;
++    ggml_cuda_set_device(ctx.device);
++    split_merge_kernel<<<unsigned(plan.heads*plan.queries),256,0,ctx.stream()>>>(
++        static_cast<float *>(output->data), reinterpret_cast<const float2 *>(base+plan.meta_offset), int(plan.splits), values, lse);
++    CUDA_CHECK(cudaGetLastError());
++    return true;
++}
++
++static bool split_fetch(ggml_backend_t backend, const void * q, void * host_q, size_t q_bytes,
++        const void * mask, void * host_mask, size_t mask_bytes, void ** event) {
++    if (!backend || !ggml_backend_is_cuda(backend) || capture_active(backend) || !q || !host_q || !q_bytes ||
++            (mask_bytes && (!mask || !host_mask)) || !event) return false;
++    auto & ctx = *static_cast<ggml_backend_cuda_context *>(backend->context);
++    ggml_cuda_set_device(ctx.device);
++    cudaEvent_t done;
++    CUDA_CHECK(cudaEventCreateWithFlags(&done,cudaEventDisableTiming));
++    CUDA_CHECK(cudaMemcpyAsync(host_q,q,q_bytes,cudaMemcpyDeviceToHost,ctx.stream()));
++    if (mask_bytes) CUDA_CHECK(cudaMemcpyAsync(host_mask,mask,mask_bytes,cudaMemcpyDeviceToHost,ctx.stream()));
++    CUDA_CHECK(cudaEventRecord(done,ctx.stream()));
++    *event = done;
++    return true;
++}
++
++static bool split_wait(void * event) {
++    if (!event) return false;
++    auto done = static_cast<cudaEvent_t>(event);
++    const bool ok = cudaEventSynchronize(done) == cudaSuccess;
++    CUDA_CHECK(cudaEventDestroy(done));
++    return ok;
++}
++
++const ggml_kv_stream_split_ops * ggml_cuda_kv_stream_split_ops() {
++    static const ggml_kv_stream_split_ops ops{split_fetch,split_wait,split_merge};
++    return &ops;
++}
++
+ // Keep CUDA details behind the backend-neutral registry contract.
+ const ggml_kv_stream_partial_ops * ggml_cuda_kv_stream_partial_ops() {
+     static_assert(sizeof(float2) == sizeof(ggml_kv_stream_partial_meta), "partial metadata ABI");
+diff --git a/ggml/src/ggml-cuda/kv-stream-partial.cuh b/ggml/src/ggml-cuda/kv-stream-partial.cuh
+index 531c0a073..0f206be60 100644
+--- a/ggml/src/ggml-cuda/kv-stream-partial.cuh
++++ b/ggml/src/ggml-cuda/kv-stream-partial.cuh
+@@ -1,12 +1,15 @@
+ #pragma once
+ #include "../ggml-kv-stream-device.h"
+ #include "../ggml-kv-stream-copy.h"
++#include "../ggml-kv-stream-split.h"
+ #include "kv-stream-attention-plan.h"
+ 
+ #if !defined(GGML_USE_HIP) && !defined(GGML_USE_MUSA)
+ // Optional synchronous partial export/merge adapter; not an ordinary attention dispatcher.
+ const ggml_kv_stream_partial_ops * ggml_cuda_kv_stream_partial_ops();
+ const ggml_kv_stream_copy_ops * ggml_cuda_kv_stream_copy_ops();
++// Split attention hand-over and merge (ggml-kv-stream-split.h).
++const ggml_kv_stream_split_ops * ggml_cuda_kv_stream_split_ops();
+ // Private metadata query; no payload or physical KV allocation is needed to describe a launch.
+ ggml_cuda_kv_stream_plan_status ggml_cuda_kv_stream_attention_plan_query(
+         ggml_backend_t backend, const ggml_tensor * op, const ggml_kv_stream_span_plan_view * view,
+diff --git a/ggml/src/ggml-kv-stream-split.h b/ggml/src/ggml-kv-stream-split.h
+new file mode 100644
+index 000000000..bb46e797f
+--- /dev/null
++++ b/ggml/src/ggml-kv-stream-split.h
+@@ -0,0 +1,19 @@
++#pragma once
++
++#include "ggml-kv-stream-device.h"
++
++// Split attention: a part of the K/V is attended elsewhere (the CPU, in place in host memory) and merged by its
++// log-sum-exp. Backend proc "ggml_backend_kv_stream_split_ops". Host pointers are in the device's host buffer type.
++struct ggml_kv_stream_split_ops {
++    // Queue copies of q_bytes from q and mask_bytes from mask (device pointers) to host memory behind the work already
++    // queued on the backend, and record their completion in a new event.
++    bool (*fetch)(ggml_backend_t backend, const void * q, void * host_q, size_t q_bytes,
++            const void * mask, void * host_mask, size_t mask_bytes, void ** event);
++    // Block until the fetch is done; frees the event.
++    bool (*wait)(void * event);
++    // After the last resume span of a vector plan (splits > 1): merge values [queries][heads][256] (normalized) and
++    // lse [queries][heads], both complete in host memory, into the output. Asynchronous.
++    bool (*merge)(ggml_backend_t backend, ggml_tensor * output, ggml_backend_buffer_t workspace,
++            const ggml_kv_stream_resume_plan & plan, const float * values, const float * lse);
++};
++using ggml_kv_stream_split_ops_get = const ggml_kv_stream_split_ops * (*)();
+diff --git a/src/llama-kv-stream-resident.cpp b/src/llama-kv-stream-resident.cpp
+index 780030c3e..c81f0b221 100644
+--- a/src/llama-kv-stream-resident.cpp
++++ b/src/llama-kv-stream-resident.cpp
+@@ -9,12 +9,19 @@
+ #include "../ggml/src/ggml-cuda-graph.h"
+ #include "../ggml/src/ggml-backend-execution.h"
+ #include "llama-impl.h"
++#include "ggml-cpu.h"
++#include "../ggml/src/ggml-fa-lse.h"
++#include "../ggml/src/ggml-kv-stream-split.h"
+ 
+ #include <cmath>
+ #include <chrono>
+ #include <atomic>
++#include <condition_variable>
++#include <cstdlib>
+ #include <cstring>
+ #include <limits>
++#include <mutex>
++#include <thread>
+ #include <utility>
+ 
+ // Binding recreation must not make a new counter history look like an earlier runtime's history.
+@@ -23,6 +30,196 @@ using resident_lease_ptr = std::unique_ptr<ggml_backend_memory_lease,decltype(&g
+ using resident_span_plan_ptr = std::unique_ptr<ggml_kv_stream_span_plan,decltype(&ggml_kv_stream_span_plan_free)>;
+ struct pending_resident_write;
+ 
++// Split attention (LLAMA_KV_SPLIT=fraction): in a decode step the CPU attends the oldest streamed pages of each
++// layer in place in the host store, while the GPU attends the rest; the backend merges both parts by their LSE.
++// The pages the CPU takes are not copied. LLAMA_KV_SPLIT_THREADS sets the CPU threads, LLAMA_KV_SPLIT_DEBUG prints timings.
++struct resident_split {
++    struct job {
++        const char * k = nullptr, * v = nullptr;
++        size_t tokens = 0, k_token_bytes = 0, v_token_bytes = 0;
++        ggml_type type_k = GGML_TYPE_COUNT, type_v = GGML_TYPE_COUNT;
++        int64_t dim_k = 0, dim_v = 0, kv_heads = 0, heads = 0;
++        size_t q_nb1 = 0, q_nb2 = 0;
++        float scale = 1.0f;
++        void * fetched = nullptr;
++    };
++
++    float fraction = 0.0f;
++    int threads = 0;
++    bool debug = false, verify = false;
++    float * checked = nullptr;
++    double verify_max = 0.0, verify_sum = 0.0;
++    int64_t verify_count = 0;
++    uint32_t heads = 0;
++    const ggml_kv_stream_split_ops * ops = nullptr;
++    ggml_backend_buffer_t host = nullptr;
++    size_t q_capacity = 0, mask_capacity = 0;
++    float * q = nullptr, * values = nullptr, * lse = nullptr;
++    ggml_fp16_t * mask = nullptr;
++
++    std::mutex mutex;
++    std::condition_variable cv;
++    std::thread worker;
++    ggml_threadpool * pool = nullptr;
++    std::vector<uint8_t> work;
++    job next;
++    bool queued = false, running = false, done = false, ok = false, stop = false;
++
++    int64_t t_wait = 0, t_attend = 0, t_block = 0, n_layers = 0, n_bytes = 0, n_steps = 0;
++
++    ~resident_split() {
++        {
++            std::lock_guard<std::mutex> lock(mutex);
++            stop = true;
++        }
++        cv.notify_all();
++        if (worker.joinable()) worker.join();
++        if (host) ggml_backend_buffer_free(host);
++    }
++
++    static std::unique_ptr<resident_split> create(ggml_backend_t backend, const ggml_kv_stream_shape & shape, size_t tokens) {
++        const char * value = std::getenv("LLAMA_KV_SPLIT");
++        if (!value) return {};
++        const float fraction = std::strtof(value,nullptr);
++        // LLAMA_KV_SPLIT_VERIFY: compare every decode layer's output with CPU attention over the whole context.
++        const bool verify = std::getenv("LLAMA_KV_SPLIT_VERIFY") != nullptr;
++        if (!(fraction > 0.0f && fraction < 1.0f) && !(verify && fraction == 0.0f)) {
++            LLAMA_LOG_WARN("%s: LLAMA_KV_SPLIT=%s is not a fraction in (0, 1), split attention off\n", __func__, value);
++            return {};
++        }
++        auto * dev = ggml_backend_get_device(backend);
++        auto get = reinterpret_cast<ggml_kv_stream_split_ops_get>(ggml_backend_reg_get_proc_address(
++            ggml_backend_dev_backend_reg(dev),"ggml_backend_kv_stream_split_ops"));
++        auto * host_type = ggml_backend_dev_host_buffer_type(dev);
++        if (!get || !get() || !host_type || shape.head_dim_k != 256 || shape.head_dim_v != 256) {
++            LLAMA_LOG_WARN("%s: split attention needs the backend's split ops, a host buffer type and head size 256; off\n", __func__);
++            return {};
++        }
++        auto result = std::make_unique<resident_split>();
++        result->fraction = fraction;
++        result->verify = verify;
++        result->ops = get();
++        const char * threads = std::getenv("LLAMA_KV_SPLIT_THREADS");
++        result->threads = threads ? std::atoi(threads) : int(std::max(1u,std::thread::hardware_concurrency()*2/3));
++        if (result->threads < 1) result->threads = 1;
++        result->debug = std::getenv("LLAMA_KV_SPLIT_DEBUG") != nullptr;
++        // one decode row: Q and the output for up to 64 query heads of 256, and a mask row over the context
++        result->q_capacity = 64*256;
++        result->mask_capacity = (tokens+255)/256*256;
++        const size_t bytes = 3*result->q_capacity*sizeof(float) + 64*sizeof(float) + result->mask_capacity*sizeof(ggml_fp16_t) + 5*128;
++        result->host = ggml_backend_buft_alloc_buffer(host_type,bytes);
++        if (!result->host) return {};
++        auto * base = static_cast<char *>(ggml_backend_buffer_get_base(result->host));
++        const auto align = [](size_t n) { return (n+127)/128*128; };
++        size_t offset = 0;
++        result->q = reinterpret_cast<float *>(base+offset); offset += align(result->q_capacity*sizeof(float));
++        result->values = reinterpret_cast<float *>(base+offset); offset += align(result->q_capacity*sizeof(float));
++        result->lse = reinterpret_cast<float *>(base+offset); offset += align(64*sizeof(float));
++        result->checked = reinterpret_cast<float *>(base+offset); offset += align(result->q_capacity*sizeof(float));
++        result->mask = reinterpret_cast<ggml_fp16_t *>(base+offset);
++        LLAMA_LOG_WARN("%s: split attention on: CPU share %.2f of the streamed pages, %d threads\n", __func__, fraction, result->threads);
++        return result;
++    }
++
++    void submit(const job & item) {
++        {
++            std::lock_guard<std::mutex> lock(mutex);
++            next = item; queued = true; done = false; ok = false;
++        }
++        if (!worker.joinable()) worker = std::thread([this] { main(); });
++        cv.notify_all();
++    }
++
++    // Wait for the submitted layer; true if it succeeded.
++    bool finish() {
++        const int64_t t0 = ggml_time_us();
++        std::unique_lock<std::mutex> lock(mutex);
++        cv.wait(lock,[&] { return done || (!queued && !running); });
++        t_block += ggml_time_us()-t0;
++        const bool result = done && ok;
++        done = false;
++        return result;
++    }
++
++    bool pending() {
++        std::lock_guard<std::mutex> lock(mutex);
++        return queued || running || done;
++    }
++
++    void main() {
++        ggml_threadpool_params params = ggml_threadpool_params_default(threads);
++        pool = ggml_threadpool_new(&params);
++        for (;;) {
++            job item;
++            {
++                std::unique_lock<std::mutex> lock(mutex);
++                cv.wait(lock,[&] { return stop || queued; });
++                if (stop) break;
++                item = next; queued = false; running = true;
++            }
++            const bool result = pool && attend(item);
++            {
++                std::lock_guard<std::mutex> lock(mutex);
++                running = false; done = true; ok = result;
++            }
++            cv.notify_all();
++        }
++        if (pool) ggml_threadpool_free(pool);
++        pool = nullptr;
++    }
++
++    bool attend(const job & item) {
++        const int64_t t0 = ggml_time_us();
++        if (!ops->wait(item.fetched)) return false;
++        const int64_t t1 = ggml_time_us();
++        const ggml_init_params params = {8*ggml_tensor_overhead() + ggml_graph_overhead_custom(8,false), nullptr, true};
++        ggml_context_ptr ctx{ggml_init(params)};
++        if (!ctx) return false;
++        ggml_tensor * q = ggml_new_tensor_3d(ctx.get(),GGML_TYPE_F32,item.dim_k,1,item.heads);
++        q->nb[1] = item.q_nb1; q->nb[2] = item.q_nb2; q->nb[3] = item.q_nb2*size_t(item.heads);
++        q->data = this->q;
++        const auto plane = [&](bool value) {
++            const auto type = value ? item.type_v : item.type_k;
++            const int64_t dim = value ? item.dim_v : item.dim_k;
++            const size_t stride = value ? item.v_token_bytes : item.k_token_bytes;
++            ggml_tensor * t = ggml_new_tensor_3d(ctx.get(),type,dim,int64_t(item.tokens),item.kv_heads);
++            t->nb[1] = stride; t->nb[2] = ggml_row_size(type,dim); t->nb[3] = stride*item.tokens;
++            t->data = const_cast<char *>(value ? item.v : item.k);
++            return t;
++        };
++        ggml_tensor * m = ggml_new_tensor_2d(ctx.get(),GGML_TYPE_F16,int64_t(item.tokens),1);
++        m->data = mask;
++        ggml_tensor * fa = ggml_flash_attn_ext(ctx.get(),q,plane(false),plane(true),m,item.scale,0.0f,0.0f);
++        fa->data = values;
++        ggml_flash_attn_ext_set_lse(fa,lse);
++        ggml_cgraph * graph = ggml_new_graph_custom(ctx.get(),8,false);
++        ggml_build_forward_expand(graph,fa);
++        ggml_cplan plan = ggml_graph_plan(graph,threads,pool);
++        if (plan.work_size > work.size()) work.resize(plan.work_size);
++        plan.work_data = work.data();
++        if (ggml_graph_compute(graph,&plan) != GGML_STATUS_SUCCESS) return false;
++        const int64_t t2 = ggml_time_us();
++        t_wait += t1-t0; t_attend += t2-t1; ++n_layers;
++        n_bytes += int64_t(item.tokens*(item.k_token_bytes+item.v_token_bytes));
++        return true;
++    }
++
++    void report(const std::vector<size_t> & split, size_t padded) {
++        if (!debug || ++n_steps % 32) return;
++        if (verify && verify_count) {
++            LLAMA_LOG_WARN("split verify: output against CPU attention over the whole context: max |diff| %.3g, mean |diff| %.3g\n",
++                verify_max, verify_sum/double(verify_count));
++            verify_max = verify_sum = 0.0; verify_count = 0;
++        }
++        size_t tokens = 0, layers = 0;
++        for (auto item : split) { tokens += item; layers += item != 0; }
++        LLAMA_LOG_WARN("split: context %zu, CPU takes %zu tokens in %zu of %zu layers; per step: CPU waited %.1f ms for Q, "
++            "attended %.1f ms (%.1f GB/s), host blocked %.1f ms\n", padded, tokens, layers, split.size(), t_wait/32e3, t_attend/32e3,
++            t_attend ? n_bytes/(t_attend*1e-6)/1e9 : 0.0, t_block/32e3);
++        t_wait = t_attend = t_block = n_layers = n_bytes = 0;
++    }
++};
++
+ struct llama_kv_stream_resident::implementation {
+     llama_kv_stream_binding_view binding;
+     std::shared_ptr<llama_kv_stream_content> content;
+@@ -72,6 +269,8 @@ struct llama_kv_stream_resident::implementation {
+         bool decode = false;
+         bool read_only = false, reused_pending = false;
+         llama_kv_stream_prefetch_stats stats;
++        // Per layer: tokens after the resident prefix that the CPU attends (split attention).
++        std::vector<size_t> split_tokens;
+     };
+     std::unique_ptr<prefetch_sequence> sequence;
+     std::vector<std::shared_ptr<pending_resident_write>> pending_writes;
+@@ -95,6 +294,8 @@ struct llama_kv_stream_resident::implementation {
+     std::chrono::steady_clock::time_point run_started;
+     // Destroy the copy queue before tensor metadata and authoritative host storage.
+     std::unique_ptr<void,void(*)(void*)> copies{nullptr,nullptr};
++    // Last member: its worker stops before anything it reads is released.
++    std::unique_ptr<resident_split> split;
+ 
+     bool capturing() const { return query_capture && query_capture(backend); }
+     // A return to the same extent after streaming must not resurrect a previous resident capture.
+@@ -506,6 +707,25 @@ bool llama_kv_stream_resident::begin_sequence(const std::vector<uint32_t> & laye
+             const size_t immutable = stable == active ? seq->padded : stable/s.page.tokens*s.page.tokens;
+             seq->profile |= !feedback_context.read_only && feedback_context.decode && seq->queries == 1 && prefixes.back() < immutable;
+         }
++        seq->split_tokens.assign(layers.size(),0);
++        if (s.split && s.split->heads && seq->decode && seq->queries == 1 && !seq->read_only && s.resumed_decode && !s.fallback) {
++            ggml_kv_stream_resume_plan plan;
++            const auto * ops = partial_ops();
++            const bool vector = ggml_kv_stream_resume_plan_query(ops,s.backend,{s.binding.config.shape,s.split->heads,1,seq->padded},plan) &&
++                plan.splits > 1 && !plan.resume_resident && !plan.span_resume &&
++                std::all_of(std::begin(plan.kernel_config),std::end(plan.kernel_config),[](uint32_t item) { return item == 0; });
++            // The CPU takes the oldest streamed pages, never rows written in this step, and leaves the GPU at least one page.
++            const size_t page = s.page.tokens, immutable = stable/page*page;
++            for (size_t i = 0; vector && i < layers.size(); ++i) {
++                const size_t prefix = prefixes[i];
++                if (!prefix || prefix >= seq->padded || immutable <= prefix) continue;
++                const size_t streamed = seq->padded-prefix;
++                size_t tokens = size_t(double(s.split->fraction)*double(streamed))/page*page;
++                tokens = std::min({tokens,immutable-prefix,streamed-page,s.split->mask_capacity});
++                seq->split_tokens[i] = tokens;
++                prefixes[i] += tokens;
++            }
++        }
+         const std::vector<uint8_t> empty;
+         const auto & blocked = seq->ring_guard ? seq->ring_guard->blocked_slots() : empty;
+         const bool streamed = std::any_of(prefixes.begin(), prefixes.end(),
+@@ -643,6 +863,7 @@ std::unique_ptr<llama_kv_stream_resident> llama_kv_stream_resident::create(
+             }
+         }
+         if (s.physical_layers.size() != host_layers) return {};
++        s.split = resident_split::create(backend,shape,s.content->host()->config().context_tokens);
+         s.fallback = state.budget.page.attention == ggml_kv_stream_attention::f16;
+         s.conversion = state.budget.page.conversion;
+         auto * reg = ggml_backend_dev_backend_reg(ggml_backend_get_device(backend));
+@@ -1134,9 +1355,13 @@ bool llama_kv_stream_resident::compute_streamed(uint32_t layer, ggml_tensor * q,
+     const size_t padded = (active_tokens+255)/256*256;
+     const bool compact_mask=mask->type == GGML_TYPE_I32;
+     const size_t prefix = std::min(padded,s.placement(layer).planes.tokens);
++    // Split attention: the CPU attends [prefix, stream_first) in place; only the rest streams.
++    const size_t split_tokens = cross && s.sequence->next < s.sequence->split_tokens.size() ?
++        s.sequence->split_tokens[s.sequence->next] : 0;
++    const size_t stream_first = prefix+split_tokens;
+     const size_t slots = s.binding.initial_policy.ring_slots;
+     if (!slots || !span_pages || slots > s.layout.ring.bytes/s.page.bytes) return false;
+-    const size_t blocks = (padded-prefix)/s.page.tokens + ((padded-prefix)%s.page.tokens != 0);
++    const size_t blocks = (padded-stream_first)/s.page.tokens + ((padded-stream_first)%s.page.tokens != 0);
+     const auto width = [&](size_t block) { return ggml_kv_stream_contiguous_pages(block,blocks,slots,span_pages); };
+     if (compact_mask) {
+         if (mask->ne[0] != 4 || mask->ne[1] != q->ne[1] || mask->ne[2] != 1 || mask->ne[3] != 1 ||
+@@ -1174,6 +1399,10 @@ bool llama_kv_stream_resident::compute_streamed(uint32_t layer, ggml_tensor * q,
+     bool prefix_pending=span_resume && prefix && blocks;
+     // Short prefills use the same encoded gather and stock kernel as longer prefills.
+     const bool native = s.native_graph_attention && !resumed && (prefill || q->ne[1] != 2 || segmented || !s.resumed_decode);
++    const bool split_path = s.split && cross && s.sequence->decode && q->ne[1] == 1 && resumed && !segmented && !span_resume &&
++        !native && !s.fallback && !compact_mask && q->type == GGML_TYPE_F32 && q->nb[0] == sizeof(float) && q->ne[2] <= 64;
++    if (split_path && !s.split->heads) s.split->heads = uint32_t(q->ne[2]);
++    if (split_tokens && (!split_path || uint32_t(q->ne[2]) != s.split->heads)) return false;
+     if (ggml_kv_stream_block_layout_make(size_t(q->ne[1])*size_t(q->ne[2]),size_t(output->ne[0]),work).status !=
+             ggml_kv_stream_partial_status::success) return false;
+     if (native && !segmented && ggml_kv_stream_layout_make(s.binding.config.shape,padded,gathered).status != ggml_kv_stream_status::success) return false;
+@@ -1245,7 +1474,7 @@ bool llama_kv_stream_resident::compute_streamed(uint32_t layer, ggml_tensor * q,
+     for (size_t block = 0; block < blocks; block += width(block)) {
+         const size_t pages = width(block);
+         for (size_t offset = 0; offset < pages; offset += s.fallback ? 1 : pages) {
+-            const size_t first = prefix+(block+offset)*s.page.tokens;
++            const size_t first = stream_first+(block+offset)*s.page.tokens;
+             const size_t count = std::min((s.fallback ? 1 : pages)*s.page.tokens,padded-first);
+             if (!describe(first,count,block%slots+offset,false)) return false;
+         }
+@@ -1285,6 +1514,27 @@ bool llama_kv_stream_resident::compute_streamed(uint32_t layer, ggml_tensor * q,
+         else if (s.feedback_queries != uint32_t(q->ne[1])) s.sequence->feedback_valid = false;
+     }
+     s.attention_calls = 0;
++    struct split_guard {
++        resident_split * split = nullptr;
++        ~split_guard() { if (split) split->finish(); }
++    } splitting;
++    if (split_tokens) {
++        auto & split = *s.split;
++        const size_t q_bytes = size_t(q->ne[2]-1)*q->nb[2] + size_t(q->ne[0])*sizeof(float);
++        if (q_bytes > split.q_capacity*sizeof(float) || split.pending()) return false;
++        resident_split::job item;
++        if (!split.ops->fetch(s.backend,q->data,split.q,q_bytes,static_cast<const char *>(mask->data)+prefix*sizeof(ggml_fp16_t),
++                split.mask,split_tokens*sizeof(ggml_fp16_t),&item.fetched)) return false;
++        const auto & shape = s.binding.config.shape;
++        item.k = static_cast<const char *>(host.k)+prefix*s.page.k_token_bytes;
++        item.v = static_cast<const char *>(host.v)+prefix*s.page.v_token_bytes;
++        item.tokens = split_tokens; item.k_token_bytes = s.page.k_token_bytes; item.v_token_bytes = s.page.v_token_bytes;
++        item.type_k = ggml_type(shape.type_k); item.type_v = ggml_type(shape.type_v);
++        item.dim_k = shape.head_dim_k; item.dim_v = shape.head_dim_v; item.kv_heads = shape.heads; item.heads = q->ne[2];
++        item.q_nb1 = q->nb[1]; item.q_nb2 = q->nb[2]; item.scale = scale;
++        split.submit(item);
++        splitting.split = &split;
++    }
+     const auto partial = [&](bool second) {
+         if (!ops->partial(s.backend,&op,wb,second)) return false;
+         ++s.attention_calls;
+@@ -1296,9 +1546,40 @@ bool llama_kv_stream_resident::compute_streamed(uint32_t layer, ggml_tensor * q,
+         ~copy_guard() { if (queue) ops->drain(queue); }
+     } copying;
+     bool direct_result = false;
++    // Debug check: full CPU attention over [0, active) from the host store against the finished output.
++    const auto verify_output = [&] {
++        auto & split = *s.split;
++        const size_t q_bytes = size_t(q->ne[2]-1)*q->nb[2] + size_t(q->ne[0])*sizeof(float);
++        const size_t out_bytes = ggml_nbytes(output);
++        if (q_bytes > split.q_capacity*sizeof(float) || out_bytes > split.q_capacity*sizeof(float)) return false;
++        void * event = nullptr;
++        if (!split.ops->fetch(s.backend,output->data,split.checked,out_bytes,nullptr,nullptr,0,&event) || !split.ops->wait(event)) return false;
++        if (!split.ops->fetch(s.backend,q->data,split.q,q_bytes,mask->data,split.mask,padded*sizeof(ggml_fp16_t),&event)) return false;
++        const auto & shape = s.binding.config.shape;
++        resident_split::job item;
++        item.fetched = event;
++        item.k = static_cast<const char *>(host.k); item.v = static_cast<const char *>(host.v);
++        item.tokens = padded; item.k_token_bytes = s.page.k_token_bytes; item.v_token_bytes = s.page.v_token_bytes;
++        item.type_k = ggml_type(shape.type_k); item.type_v = ggml_type(shape.type_v);
++        item.dim_k = shape.head_dim_k; item.dim_v = shape.head_dim_v; item.kv_heads = shape.heads; item.heads = q->ne[2];
++        item.q_nb1 = q->nb[1]; item.q_nb2 = q->nb[2]; item.scale = scale;
++        split.submit(item);
++        if (!split.finish()) return false;
++        for (size_t i = 0; i < out_bytes/sizeof(float); ++i) {
++            const double diff = std::fabs(double(split.checked[i])-double(split.values[i]));
++            split.verify_max = std::max(split.verify_max,diff); split.verify_sum += diff; ++split.verify_count;
++        }
++        return true;
++    };
+     const auto finish = [&] {
+         if (cross && s.sequence->plan.front() && s.sequence->plan.front()->layer == s.sequence->next) return false;
+         if (!direct_result && !ops->merge(s.backend,output,wb)) return false;
++        if (splitting.split) {
++            splitting.split = nullptr;
++            if (!s.split->finish() || !s.split->ops->merge(s.backend,output,wb,resume_plan,s.split->values,s.split->lse)) return false;
++        }
++        if (s.split && s.split->verify && split_path && !verify_output()) return false;
++        if (cross && s.split && s.sequence->next+1 == s.sequence->layers.size()) s.split->report(s.sequence->split_tokens,padded);
+         if (cross) {
+             ++s.sequence->next;
+             if (s.sequence->next == s.sequence->layers.size() && s.pending_writes.empty()) s.stop_sequence(true);
+@@ -1331,7 +1612,7 @@ bool llama_kv_stream_resident::compute_streamed(uint32_t layer, ggml_tensor * q,
+         copying.ops = s.copy_ops; copying.queue = s.copies.get();
+     }
+     const auto enqueue = [&](size_t block) {
+-        const size_t first = prefix+block*s.page.tokens;
++        const size_t first = stream_first+block*s.page.tokens;
+         const size_t count = std::min(width(block)*s.page.tokens,padded-first), live = std::min(count,active_tokens-first);
+         if (!s.copy_ops->enqueue_span(s.copies.get(),block%slots,
+                 static_cast<const char *>(host.k)+first*s.page.k_token_bytes,
+@@ -1496,7 +1777,7 @@ bool llama_kv_stream_resident::compute_streamed(uint32_t layer, ggml_tensor * q,
+         }
+     }
+     for (size_t block = 0; block < blocks;) {
+-        const size_t first = prefix+block*s.page.tokens;
++        const size_t first = stream_first+block*s.page.tokens;
+         if (span_resume) {
+             llama_kv_stream_prefetch_wave wave;
+             if (!s.sequence->plan.ready_wave(resume_group_pages,prefix_pending ? 2 : 3,wave)) return false;
+-- 
+2.53.0
+

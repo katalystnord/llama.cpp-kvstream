@@ -1,0 +1,25 @@
+0.00.074.316 I srv  llama_server: initializing ...
+0.00.074.327 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)
+0.00.074.659 W srv  llama_server: security: no API key is set and CORS allows all origins (see https://github.com/ggml-org/llama.cpp/pull/25655)
+0.00.076.980 I srv    load_model: loading model '~/code/kv-stream-brick/models/Qwen3.5-4B-Q4_K_M.gguf'
+0.01.717.123 W create: LLAMA_KV_SPLIT=0 is not a fraction in (0, 1), split attention off
+0.01.760.029 W create: LLAMA_KV_SPLIT=0 is not a fraction in (0, 1), split attention off
+0.01.760.869 W memory_phase: phase=prefill parent=939524096 compute=635726080 kv_pool=85413632 writer=280576 attention=218103808 persistent_kv=0 publication_stage=0 unused=0 reclaimed_compute=0 capture=external transition_us=0 arena_gen=1 kv_revision=1 resident_pages=24 ring_slots=8 active_pages=0 streaming=0 last_h2d_bytes=0 last_h2d_calls=0 copy_ms=0.000 elapsed_ms=0.000
+0.01.765.621 I cmn          init: llama threadpool init, n_threads = 6
+0.01.767.607 W KV_reload: bytes=3407872 calls=16 padded_rows=256 drain_us=1 upload_us=412 begin_us=29651233916 end_us=29651234338
+0.02.058.555 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 131072, kv_unified = 'false'
+0.02.065.362 I srv  llama_server: model loaded
+0.02.065.375 I srv  llama_server: listening on http://127.0.0.1:8098
+0.04.520.395 I slot load_slot_ch: id  0 | task -1 | restored 2 context checkpoint(s) from '~/code/kv-stream-brick/slots/fill-131072-896-130000.bin'
+0.04.662.427 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, f_sim_best = 1.000 (> 0.100 thold), f_keep = 1.000
+0.04.662.606 I slot launch_slot_: id  0 | task 1 | processing task, is_child = 0
+0.05.109.316 W create: LLAMA_KV_SPLIT=0 is not a fraction in (0, 1), split attention off
+0.05.111.662 W memory_phase: phase=decode parent=939524096 compute=5055232 kv_pool=933778432 writer=280576 attention=409856 persistent_kv=0 publication_stage=0 unused=0 reclaimed_compute=630670848 capture=external transition_us=1987 arena_gen=2 kv_revision=2 resident_pages=236 ring_slots=304 active_pages=508 streaming=1 last_h2d_bytes=1648771072 last_h2d_calls=3392 copy_ms=0.000 elapsed_ms=0.000
+0.05.177.550 W KV_reload: bytes=804257792 calls=16 padded_rows=130048 drain_us=1 upload_us=65049 begin_us=29654579223 end_us=29654644281
+0.12.394.521 I slot print_timing: id  0 | task 1 | prompt eval time =     445.59 ms /     4 tokens (  111.40 ms per token,     8.98 tokens per second)
+0.12.394.524 I slot print_timing: id  0 | task 1 |        eval time =    7286.30 ms /    64 tokens (  115.66 ms per token,     8.65 tokens per second)
+0.12.394.525 I slot print_timing: id  0 | task 1 |       total time =    7731.89 ms /    68 tokens
+0.12.394.529 I slot print_timing: id  0 | task 1 |    graphs reused =         62
+0.12.398.992 I slot      release: id  0 | task 1 | stop processing: n_tokens = 130063, truncated = 0
+0.12.456.701 I srv    operator(): operator(): cleaning up before exit...
+0.12.458.441 W ~llama_context:  CUDA_Host compute buffer size of   0.5549 MiB, does not match expectation of  74.2774 MiB

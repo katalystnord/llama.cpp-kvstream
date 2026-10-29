@@ -1,0 +1,191 @@
+0.00.035.917 I srv  llama_server: initializing ...
+0.00.035.929 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)
+0.00.036.228 W srv  llama_server: security: no API key is set and CORS allows all origins (see https://github.com/ggml-org/llama.cpp/pull/25655)
+0.00.038.241 I srv    load_model: loading model '~/models/gguf/underdog-saluki-27b/Underdog-Saluki-27B-1.0-IQ2-mix.gguf'
+0.26.542.538 I cmn          init: llama threadpool init, n_threads = 12
+0.26.681.643 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 262144, kv_unified = 'false'
+0.26.684.975 W srv          init: chat template supports preserving reasoning, it is enabled by default (may use more tokens, disable via --no-reasoning-preserve)
+0.26.685.012 I srv  llama_server: model loaded
+0.26.685.016 I srv  llama_server: listening on http://127.0.0.1:8099
+0.28.199.862 I slot get_availabl: id  0 | task -1 | selected slot by LRU, n_tokens = 0, t_last = -1
+0.28.200.021 I slot launch_slot_: id  0 | task 0 | processing task, is_child = 0
+0.34.227.113 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =   4096, progress = 0.02, t =   6.03 s / 679.60 tokens per second
+0.37.492.783 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =   6144, progress = 0.02, t =   9.29 s / 661.16 tokens per second
+0.40.819.008 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =   8192, progress = 0.03, t =  12.62 s / 649.18 tokens per second
+0.44.204.146 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  10240, progress = 0.04, t =  16.00 s / 639.84 tokens per second
+0.47.640.067 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  12288, progress = 0.05, t =  19.44 s / 632.10 tokens per second
+0.51.160.911 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  14336, progress = 0.06, t =  22.96 s / 624.37 tokens per second
+0.54.708.582 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  16384, progress = 0.07, t =  26.51 s / 618.07 tokens per second
+0.58.403.383 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  18432, progress = 0.07, t =  30.20 s / 610.26 tokens per second
+1.02.002.755 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  20480, progress = 0.08, t =  33.80 s / 605.87 tokens per second
+1.05.730.051 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  22528, progress = 0.09, t =  37.53 s / 600.27 tokens per second
+1.09.513.049 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  24576, progress = 0.10, t =  41.31 s / 594.87 tokens per second
+1.13.342.640 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  26624, progress = 0.11, t =  45.14 s / 589.78 tokens per second
+1.17.227.655 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  28672, progress = 0.11, t =  49.03 s / 584.81 tokens per second
+1.21.257.036 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  30720, progress = 0.12, t =  53.06 s / 579.00 tokens per second
+1.25.147.401 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  32768, progress = 0.13, t =  56.95 s / 575.41 tokens per second
+1.29.230.349 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  34816, progress = 0.14, t =  61.03 s / 570.47 tokens per second
+1.33.400.478 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  36864, progress = 0.15, t =  65.20 s / 565.40 tokens per second
+1.37.585.567 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  38912, progress = 0.16, t =  69.39 s / 560.81 tokens per second
+1.41.702.177 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  40960, progress = 0.16, t =  73.50 s / 557.26 tokens per second
+1.45.909.637 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  43008, progress = 0.17, t =  77.71 s / 553.45 tokens per second
+1.50.178.143 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  45056, progress = 0.18, t =  81.98 s / 549.61 tokens per second
+1.54.619.235 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  47104, progress = 0.19, t =  86.42 s / 545.06 tokens per second
+1.59.162.230 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  49152, progress = 0.20, t =  90.96 s / 540.36 tokens per second
+2.03.738.930 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  51200, progress = 0.20, t =  95.54 s / 535.91 tokens per second
+2.08.246.625 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  53248, progress = 0.21, t = 100.05 s / 532.23 tokens per second
+2.12.804.241 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  55296, progress = 0.22, t = 104.60 s / 528.62 tokens per second
+2.17.398.520 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  57344, progress = 0.23, t = 109.20 s / 525.14 tokens per second
+2.21.945.584 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  59392, progress = 0.24, t = 113.75 s / 522.15 tokens per second
+2.26.826.738 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  61440, progress = 0.25, t = 118.63 s / 517.93 tokens per second
+2.31.742.386 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  63488, progress = 0.25, t = 123.54 s / 513.90 tokens per second
+2.36.639.499 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  65536, progress = 0.26, t = 128.44 s / 510.25 tokens per second
+2.41.532.527 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  67584, progress = 0.27, t = 133.33 s / 506.88 tokens per second
+2.47.504.816 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  69632, progress = 0.28, t = 139.30 s / 499.85 tokens per second
+2.52.410.562 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  71680, progress = 0.29, t = 144.21 s / 497.05 tokens per second
+2.57.680.409 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  73728, progress = 0.29, t = 149.48 s / 493.23 tokens per second
+3.02.640.703 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  75776, progress = 0.30, t = 154.44 s / 490.65 tokens per second
+3.07.904.614 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  77824, progress = 0.31, t = 159.70 s / 487.30 tokens per second
+3.13.210.754 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  79872, progress = 0.32, t = 165.01 s / 484.04 tokens per second
+3.18.506.087 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  81920, progress = 0.33, t = 170.31 s / 481.02 tokens per second
+3.23.781.806 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  83968, progress = 0.34, t = 175.58 s / 478.23 tokens per second
+3.29.113.593 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  86016, progress = 0.34, t = 180.91 s / 475.45 tokens per second
+3.34.759.303 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  88064, progress = 0.35, t = 186.56 s / 472.04 tokens per second
+3.40.037.021 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  90112, progress = 0.36, t = 191.84 s / 469.73 tokens per second
+3.45.701.246 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  92160, progress = 0.37, t = 197.50 s / 466.63 tokens per second
+3.51.319.727 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  94208, progress = 0.38, t = 203.12 s / 463.81 tokens per second
+3.56.950.614 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  96256, progress = 0.38, t = 208.75 s / 461.11 tokens per second
+4.02.634.333 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens =  98304, progress = 0.39, t = 214.43 s / 458.43 tokens per second
+4.08.622.713 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens = 100352, progress = 0.40, t = 220.42 s / 455.27 tokens per second
+4.14.269.097 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens = 102400, progress = 0.41, t = 226.07 s / 452.96 tokens per second
+4.20.297.140 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens = 104448, progress = 0.42, t = 232.10 s / 450.02 tokens per second
+4.25.980.788 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens = 106496, progress = 0.43, t = 237.78 s / 447.87 tokens per second
+4.32.281.335 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens = 108544, progress = 0.43, t = 244.08 s / 444.70 tokens per second
+4.38.016.577 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens = 110592, progress = 0.44, t = 249.82 s / 442.69 tokens per second
+4.44.401.064 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens = 112640, progress = 0.45, t = 256.20 s / 439.65 tokens per second
+4.50.408.696 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens = 114688, progress = 0.46, t = 262.21 s / 437.39 tokens per second
+4.56.799.999 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens = 116736, progress = 0.47, t = 268.60 s / 434.61 tokens per second
+5.02.886.484 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens = 118784, progress = 0.47, t = 274.69 s / 432.43 tokens per second
+5.09.198.592 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens = 120832, progress = 0.48, t = 281.00 s / 430.01 tokens per second
+5.15.604.708 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens = 122880, progress = 0.49, t = 287.40 s / 427.55 tokens per second
+5.22.034.456 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens = 124928, progress = 0.50, t = 293.83 s / 425.16 tokens per second
+5.28.372.572 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens = 126976, progress = 0.51, t = 300.17 s / 423.01 tokens per second
+5.35.138.920 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens = 129024, progress = 0.52, t = 306.94 s / 420.36 tokens per second
+5.41.580.041 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens = 131072, progress = 0.52, t = 313.38 s / 418.25 tokens per second
+5.48.278.921 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens = 133120, progress = 0.53, t = 320.08 s / 415.90 tokens per second
+5.55.038.891 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens = 135168, progress = 0.54, t = 326.84 s / 413.56 tokens per second
+6.01.825.787 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens = 137216, progress = 0.55, t = 333.63 s / 411.29 tokens per second
+6.08.584.579 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens = 139264, progress = 0.56, t = 340.38 s / 409.14 tokens per second
+6.15.353.386 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens = 141312, progress = 0.57, t = 347.15 s / 407.06 tokens per second
+6.22.173.332 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens = 143360, progress = 0.57, t = 353.97 s / 405.00 tokens per second
+6.29.275.365 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens = 145408, progress = 0.58, t = 361.08 s / 402.71 tokens per second
+6.36.378.109 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens = 147456, progress = 0.59, t = 368.18 s / 400.50 tokens per second
+6.43.547.359 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens = 149504, progress = 0.60, t = 375.35 s / 398.31 tokens per second
+6.50.684.661 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens = 151552, progress = 0.61, t = 382.48 s / 396.23 tokens per second
+6.57.842.323 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens = 153600, progress = 0.61, t = 389.64 s / 394.21 tokens per second
+7.05.018.473 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens = 155648, progress = 0.62, t = 396.82 s / 392.24 tokens per second
+7.12.175.067 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens = 157696, progress = 0.63, t = 403.98 s / 390.36 tokens per second
+7.19.676.855 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens = 159744, progress = 0.64, t = 411.48 s / 388.22 tokens per second
+7.27.171.709 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens = 161792, progress = 0.65, t = 418.97 s / 386.16 tokens per second
+7.34.646.809 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens = 163840, progress = 0.66, t = 426.45 s / 384.20 tokens per second
+7.42.189.877 I slot print_timing: id  0 | task 0 | prompt processing, n_tokens = 165888, progress = 0.66, t = 433.99 s / 382.24 tokens per second
+8.12.225.861 E ~/code/katalystnord/llama.cpp-kvstream/src/llama-kv-stream.cpp:511: KV streaming stalled
+wait_for: stalled for 30.0 s waiting for copies to land (layer 9, tag 298)
+8.12.225.866 E log_state: tag 299, jobs 299 queued / 297 done, layer copies 4763 queued / 4761 published
+8.12.225.867 E log_state:   layer  0: ready 298 consumed 298
+8.12.225.867 E log_state:   layer  1: ready 298 consumed 298
+8.12.225.867 E log_state:   layer  2: ready 298 consumed 298
+8.12.225.868 E log_state:   layer  3: ready 298 consumed 298
+8.12.225.868 E log_state:   layer  4: ready 298 consumed 298
+8.12.225.868 E log_state:   layer  5: ready 298 consumed 298
+8.12.225.868 E log_state:   layer  6: ready 298 consumed 298
+8.12.225.868 E log_state:   layer  7: ready 298 consumed 298
+8.12.225.869 E log_state:   layer  8: ready 298 consumed 298
+8.12.225.869 E log_state:   layer  9: ready 297 consumed 297
+8.12.225.869 E log_state:   layer 10: ready 297 consumed 297
+8.12.225.869 E log_state:   layer 11: ready 297 consumed 297
+8.12.225.870 E log_state:   layer 12: ready 297 consumed 297
+8.12.225.871 E log_state:   layer 13: ready 297 consumed 297
+8.12.225.872 E log_state:   layer 14: ready 297 consumed 297
+8.12.225.872 E log_state:   layer 15: ready 297 consumed 297
+~/code/katalystnord/llama.cpp-kvstream/src/llama-kv-stream.cpp:511: KV streaming stalled
+8.12.342.431 E wait_for: stalled for 30.0 s waiting for the attention to release a slot (layer 9, tag 298)
+8.12.342.433 E log_state: tag 299, jobs 299 queued / 297 done, layer copies 4763 queued / 4761 published
+8.12.342.435 E log_state:   layer  0: ready 298 consumed 298
+8.12.342.435 E log_state:   layer  1: ready 298 consumed 298
+8.12.342.435 E log_state:   layer  2: ready 298 consumed 298
+8.12.342.436 E log_state:   layer  3: ready 298 consumed 298
+8.12.342.436 E log_state:   layer  4: ready 298 consumed 298
+8.12.342.436 E log_state:   layer  5: ready 298 consumed 298
+8.12.342.436 E log_state:   layer  6: ready 298 consumed 298
+8.12.342.436 E log_state:   layer  7: ready 298 consumed 298
+8.12.342.436 E log_state:   layer  8: ready 298 consumed 298
+8.12.342.437 E log_state:   layer  9: ready 297 consumed 297
+8.12.342.438 E log_state:   layer 10: ready 297 consumed 297
+8.12.342.438 E log_state:   layer 11: ready 297 consumed 297
+8.12.342.438 E log_state:   layer 12: ready 297 consumed 297
+8.12.342.438 E log_state:   layer 13: ready 297 consumed 297
+8.12.342.439 E log_state:   layer 14: ready 297 consumed 297
+8.12.342.440 E log_state:   layer 15: ready 297 consumed 297
+[New LWP 1267236]
+[New LWP 1267235]
+[New LWP 1267097]
+[New LWP 1266631]
+[New LWP 1266630]
+[New LWP 1266629]
+[New LWP 1266628]
+[New LWP 1266627]
+[New LWP 1266626]
+[New LWP 1266625]
+[New LWP 1266624]
+[New LWP 1266623]
+[New LWP 1266622]
+[New LWP 1266621]
+[New LWP 1266620]
+[New LWP 1266619]
+[New LWP 1266618]
+[New LWP 1266617]
+[New LWP 1266616]
+[New LWP 1266615]
+[New LWP 1266614]
+[New LWP 1266613]
+[New LWP 1266612]
+[New LWP 1266611]
+[New LWP 1266610]
+[New LWP 1266609]
+[New LWP 1266608]
+[New LWP 1266607]
+[New LWP 1266605]
+[New LWP 1266604]
+[New LWP 1266603]
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/usr/lib/x86_64-linux-gnu/libthread_db.so.1".
+0x000071854b68ce7f in ?? () from /usr/lib/x86_64-linux-gnu/libhsa-runtime64.so.1
+#0  0x000071854b68ce7f in ?? () from /usr/lib/x86_64-linux-gnu/libhsa-runtime64.so.1
+#1  0x000071854b6873ee in ?? () from /usr/lib/x86_64-linux-gnu/libhsa-runtime64.so.1
+#2  0x000071854b67b657 in ?? () from /usr/lib/x86_64-linux-gnu/libhsa-runtime64.so.1
+#3  0x000071854006421a in ?? () from /usr/lib/x86_64-linux-gnu/libamdhip64.so.7
+#4  0x000071854006433b in ?? () from /usr/lib/x86_64-linux-gnu/libamdhip64.so.7
+#5  0x000071854004f9e9 in ?? () from /usr/lib/x86_64-linux-gnu/libamdhip64.so.7
+#6  0x000071853ff521cb in ?? () from /usr/lib/x86_64-linux-gnu/libamdhip64.so.7
+#7  0x000071853ff55158 in ?? () from /usr/lib/x86_64-linux-gnu/libamdhip64.so.7
+#8  0x000071854bda7c35 in ggml_backend_cuda_synchronize(ggml_backend*) () from ~/code/katalystnord/llama.cpp-kvstream/build-hip/bin/libggml-hip.so.0
+#9  0x0000718552d605de in ggml_backend_sched_alloc_graph () from ~/code/katalystnord/llama.cpp-kvstream/build-hip/bin/libggml-base.so.0
+#10 0x0000718551a3edf4 in llama_context::process_ubatch(llama_ubatch const&, llm_graph_type, llama_memory_context_i*, ggml_status&) () from ~/code/katalystnord/llama.cpp-kvstream/build-hip/bin/libllama.so.0
+#11 0x0000718551a49819 in llama_context::decode(llama_batch_ext const&) () from ~/code/katalystnord/llama.cpp-kvstream/build-hip/bin/libllama.so.0
+#12 0x0000718552fa4b42 in std::_Function_handler<void (), server_context_impl::decode(int&, int)::{lambda()#1}>::_M_invoke(std::_Any_data const&) () from ~/code/katalystnord/llama.cpp-kvstream/build-hip/bin/libllama-server-impl.so
+#13 0x0000718552f4d139 in server_queue::yield_to_queue(std::function<void ()>&&) () from ~/code/katalystnord/llama.cpp-kvstream/build-hip/bin/libllama-server-impl.so
+#14 0x0000718552fb5a18 in server_context_impl::decode(int&, int) () from ~/code/katalystnord/llama.cpp-kvstream/build-hip/bin/libllama-server-impl.so
+#15 0x0000718552fb74a6 in server_context_impl::update_slots() () from ~/code/katalystnord/llama.cpp-kvstream/build-hip/bin/libllama-server-impl.so
+#16 0x0000718552f4dcf8 in server_queue::start_loop(long) () from ~/code/katalystnord/llama.cpp-kvstream/build-hip/bin/libllama-server-impl.so
+#17 0x0000718552eeccaf in llama_server(common_params&, int, char**, server_child&) () from ~/code/katalystnord/llama.cpp-kvstream/build-hip/bin/libllama-server-impl.so
+#18 0x0000718552eeed14 in llama_server(int, char**) () from ~/code/katalystnord/llama.cpp-kvstream/build-hip/bin/libllama-server-impl.so
+#19 0x000071855262a601 in __libc_start_call_main (main=main@entry=0x5b515e4c22f0 <main>, argc=argc@entry=37, argv=argv@entry=0x7ffddaad9f78) at ../sysdeps/nptl/libc_start_call_main.h:59
+⚠️ warning: 59	../sysdeps/nptl/libc_start_call_main.h: No such file or directory
+#20 0x000071855262a718 in __libc_start_main_impl (main=0x5b515e4c22f0 <main>, argc=37, argv=0x7ffddaad9f78, init=<optimized out>, fini=<optimized out>, rtld_fini=<optimized out>, stack_end=0x7ffddaad9f68) at ../csu/libc-start.c:360
+⚠️ warning: 360	../csu/libc-start.c: No such file or directory
+#21 0x00005b515e4c2325 in _start ()
+[Inferior 1 (process 1266596) detached]
+❌️ Unable to attach: program terminated with signal SIGABRT, Aborted.
+❌️ No stack.
+❌️ The program is not being run.

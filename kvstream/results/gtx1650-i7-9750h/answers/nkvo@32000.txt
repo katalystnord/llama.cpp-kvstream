@@ -1,0 +1,5 @@
+Question 1:
+The code word for the beast test is **MARMALADE-7**.
+
+Question 2:
+The file `llama-context.cpp` implements the `llama_context` class, which serves as the central execution engine for the LLM inference pipeline. It initializes GPU backends, manages memory allocation for KV caches and compute arenas, and handles complex scheduling logic for various architectures (e.g., Gemma4, Qwen35, DeepSeek). The code dynamically resolves fused operations like Flash Attention and Gated Delta Nets, manages recurrent rollback plans for streaming, and coordinates shared memory between parent and child contexts for advanced features like MTP (Multi-Token Prediction) and serial drafting. It also handles sampler initialization, threadpool attachment, and asynchronous tensor copying to optimize performance across different hardware configurations.
