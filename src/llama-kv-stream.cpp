@@ -5,6 +5,7 @@
 #include "ggml-cpu.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -78,8 +79,14 @@ llama_kv_stream::llama_kv_stream(const std::vector<layer> & layers, uint32_t n_s
         timeout_us = (int64_t) (atof(timeout)*1e6);
     }
     if (const char * frac = getenv("LLAMA_KV_SPLIT")) {
-        split_frac = std::clamp((float) atof(frac), 0.0f, 1.0f);
+        if (strcmp(frac, "auto") == 0) {
+            tuner.on   = true;
+            split_frac = split_step; // only to enable the split below; the tuner starts at 0
+        } else {
+            split_frac = std::clamp((float) atof(frac), 0.0f, 1.0f);
+        }
     }
+    split_threads = std::max(1, (int) std::thread::hardware_concurrency()*2/3);
     if (const char * threads = getenv("LLAMA_KV_SPLIT_THREADS")) {
         split_threads = std::max(1, atoi(threads));
     }
@@ -232,14 +239,22 @@ void llama_kv_stream::set_backend(ggml_backend_t backend, int64_t n_head) {
                 split_desc[ikv] = { split_q + ikv*rows*d, split_flags + ikv, split_out + ikv*rows*d, split_lse + ikv*rows,
                     split_flags + n_layer + ikv, split_desc[ikv].scale };
             }
-            LLAMA_LOG_INFO("%s: split attention: the CPU (%d threads) attends %.0f%% of the pages that would stream, "
-                    "shared buffers %.2f MiB\n", __func__, split_threads, 100.0*split_frac,
-                    n_layer*rows*(2*d + 1)*sizeof(float)/1024.0/1024.0);
+            if (tuner.on) {
+                split_frac = 0.0f;
+                LLAMA_LOG_INFO("%s: split attention: the CPU (%d threads) attends a measured share of the pages that "
+                        "would stream (auto), shared buffers %.2f MiB\n", __func__, split_threads,
+                        n_layer*rows*(2*d + 1)*sizeof(float)/1024.0/1024.0);
+            } else {
+                LLAMA_LOG_INFO("%s: split attention: the CPU (%d threads) attends %.0f%% of the pages that would stream, "
+                        "shared buffers %.2f MiB\n", __func__, split_threads, 100.0*split_frac,
+                        n_layer*rows*(2*d + 1)*sizeof(float)/1024.0/1024.0);
+            }
         } else {
             LLAMA_LOG_WARN("%s: LLAMA_KV_SPLIT is set, but %s; split attention is off\n", __func__,
                     !ce ? "no pages stream" : !prefill_paged ? "the backend does not attend pages directly" :
                     debug_rotate ? "LLAMA_KV_STREAM_DEBUG=rotate is set" : "the backend's attention does not merge a CPU part");
             split_frac = 0.0f;
+            tuner.on   = false;
         }
     }
 
@@ -397,7 +412,8 @@ void llama_kv_stream::prepare(const std::vector<uint32_t> & cells, uint32_t n_kv
     // split attention: the CPU takes its share of the pages that would stream, the oldest ones, while they form one
     // block from the first page (the oldest pages are the first to leave the pool, so they usually do)
     n_split = 0;
-    if (split_q && cells.size() <= decode_max_tokens) {
+    if (split_q) {
+        const bool decode_ub = cells.size() <= decode_max_tokens;
         uint32_t n_lead = 0;
         while (n_lead < n_att && page_slot[n_lead] < 0) {
             n_lead++;
@@ -406,7 +422,10 @@ void llama_kv_stream::prepare(const std::vector<uint32_t> & cells, uint32_t n_kv
         for (uint32_t p = 0; p < n_att; ++p) {
             n_out += page_slot[p] < 0;
         }
-        n_split = std::min(n_lead, (uint32_t) (split_frac*n_out));
+        const float share = tuner.on ? split_tune(n_out, decode_ub) : split_frac;
+        if (decode_ub) {
+            n_split = std::min(n_lead, (uint32_t) (share*n_out));
+        }
     }
 
     std::vector<run> copies;
@@ -649,6 +668,106 @@ void llama_kv_stream::publisher_main() {
         }
         n_published.store(++g, std::memory_order_release);
     }
+}
+
+// LLAMA_KV_SPLIT=auto: the share for the coming ubatch. The time between two consecutive decode prepares is the previous
+// ubatch's (with the host's sampling); it is counted for the share that ubatch used. Windows of split_window ubatches
+// after the first two (graph rebuild); a window's time is the mean of its middle half.
+float llama_kv_stream::split_tune(uint32_t n_out, bool decode) {
+    auto & t = tuner;
+    const int64_t now = ggml_time_us();
+    const bool counted = decode && t.n_last + 1 == n_prepared && n_out > 0;
+    if (counted) {
+        if (t.skip > 0) {
+            t.skip--;
+        } else {
+            t.samples.push_back(now - t.t_last);
+        }
+    }
+    if (decode) {
+        t.t_last = now;
+        t.n_last = n_prepared;
+    }
+    if (n_out == 0) {
+        return 0.0f; // every attended page is resident: nothing to split
+    }
+
+    const float cur = t.phase == 1 ? t.probe : t.base;
+    if (t.phase == 2) {
+        // settled: look again after a while, or when the streamed part has changed by a quarter
+        if (counted && ++t.settled >= 512) {
+            t.phase = 0;
+        } else if (n_out > t.n_out + t.n_out/4 || n_out + n_out/4 < t.n_out) {
+            t.phase = 0;
+        }
+        if (t.phase == 0) {
+            t.samples.clear();
+            t.skip = 2;
+            t.turned = false;
+        }
+        return t.base;
+    }
+    if ((int) t.samples.size() < split_window) {
+        return cur;
+    }
+
+    std::vector<int64_t> s = t.samples;
+    std::sort(s.begin(), s.end());
+    double mean = 0.0;
+    for (int i = split_window/4; i < split_window - split_window/4; ++i) {
+        mean += s[i];
+    }
+    mean /= split_window/2;
+    t.samples.clear();
+    t.skip = 2;
+
+    auto settle = [&]() {
+        t.phase   = 2;
+        t.settled = 0;
+        t.n_out   = n_out;
+        if (getenv("LLAMA_KV_SPLIT_DEBUG")) {
+            fprintf(stderr, "llama_kv_stream: split auto: settled at %.2f (%.1f ms per ubatch, %u streamed pages)\n",
+                    t.base, t.t_base/1e3, n_out);
+        }
+        return t.base;
+    };
+    auto try_probe = [&]() {
+        const float p = std::clamp(t.base + t.dir*split_step, 0.0f, 0.9f);
+        if (fabsf(p - t.base) < 1e-3f) {
+            return false;
+        }
+        t.probe = p;
+        t.phase = 1;
+        return true;
+    };
+
+    if (getenv("LLAMA_KV_SPLIT_DEBUG")) {
+        fprintf(stderr, "llama_kv_stream: split auto: share %.2f: %.1f ms per ubatch\n", cur, mean/1e3);
+    }
+    if (t.phase == 0) {
+        t.t_base = mean;
+        if (try_probe()) {
+            return t.probe;
+        }
+        t.dir = -t.dir;
+        return try_probe() ? t.probe : settle();
+    }
+    // a probe: keep it if it is at least 2% faster, then go on in the same direction
+    if (mean < 0.98*t.t_base) {
+        t.base   = t.probe;
+        t.t_base = mean;
+        t.turned = true; // having improved, do not turn back
+        return try_probe() ? t.probe : settle();
+    }
+    if (!t.turned) {
+        t.turned = true;
+        t.dir = -t.dir;
+        if (try_probe()) {
+            return t.probe;
+        }
+    }
+    t.phase = 0;
+    return settle();
 }
 
 void llama_kv_stream::splitter_main() {

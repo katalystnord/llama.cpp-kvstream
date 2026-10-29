@@ -1,0 +1,16 @@
+[2026-10-29 14:47:28] f0-t0: restored: {"id_slot":0,"filename":"split-sweep-150000.bin","n_restored":150241,"n_read":5705681024,"timings":{"restore_ms":3689.792}}
+{"label": "f0-t0", "prompt_tokens": 150070, "wall_s": 18.6, "prefill_tps": 13.2, "decode_tps": 8.8, "draft": "None/None", "needle_found": true, "answer_start": "Question 1: MARMALADE-7\n\nQuestion 2: 
+[2026-10-29 14:48:06] fauto-t16: restored: {"id_slot":0,"filename":"split-sweep-150000.bin","n_restored":150241,"n_read":5705681024,"timings":{"restore_ms":3653.899}}
+{"label": "fauto-t16", "prompt_tokens": 150070, "wall_s": 15.6, "prefill_tps": 12.8, "decode_tps": 10.6, "draft": "None/None", "needle_found": true, "answer_start": "Question 1: MARMALADE-7\n\nQuestio
+llama_kv_stream: split: 26624 rows, 1 tokens: waited 26.3 ms for Q (layers 1+), attended 57.6 ms (16.1 GB/s), per ubatch
+llama_kv_stream: split: 26624 rows, 1 tokens: waited 27.1 ms for Q (layers 1+), attended 54.0 ms (17.2 GB/s), per ubatch
+[2026-10-29 14:48:40] f0.3-t16: restored: {"id_slot":0,"filename":"split-sweep-150000.bin","n_restored":150241,"n_read":5705681024,"timings":{"restore_ms":4233.327}}
+{"label": "f0.3-t16", "prompt_tokens": 150070, "wall_s": 15.0, "prefill_tps": 8.1, "decode_tps": 11.2, "draft": "None/None", "needle_found": true, "answer_start": "Question 1: MARMALADE-7\n\nQuestion 
+llama_kv_stream: split: 26624 rows, 1 tokens: waited 27.0 ms for Q (layers 1+), attended 57.5 ms (16.1 GB/s), per ubatch
+llama_kv_stream: split: 26624 rows, 1 tokens: waited 27.0 ms for Q (layers 1+), attended 60.1 ms (15.4 GB/s), per ubatch
+[2026-10-29 14:49:13] fauto-t12: restored: {"id_slot":0,"filename":"split-sweep-150000.bin","n_restored":150241,"n_read":5705681024,"timings":{"restore_ms":3783.816}}
+{"label": "fauto-t12", "prompt_tokens": 150070, "wall_s": 17.6, "prefill_tps": 10.3, "decode_tps": 9.4, "draft": "None/None", "needle_found": true, "answer_start": "Question 1: MARMALADE-7\n\nQuestion
+llama_kv_stream: split: 17664 rows, 1 tokens: waited 34.6 ms for Q (layers 1+), attended 99.8 ms (6.2 GB/s), per ubatch
+llama_kv_stream: split: 17664 rows, 1 tokens: waited 41.2 ms for Q (layers 1+), attended 45.7 ms (13.5 GB/s), per ubatch
+[2026-10-29 14:49:37] router socket started again
+[2026-10-29 14:49:37] SWEEP DONE

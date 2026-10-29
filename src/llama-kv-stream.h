@@ -40,11 +40,14 @@
 // Debug: LLAMA_KV_STREAM_DEBUG=rotate (when the pool holds the whole context) moves every resident page through host
 // memory into a rotated slot before every ubatch.
 //
-// Split attention (LLAMA_KV_SPLIT=fraction, off by default): in decode ubatches the CPU attends over the oldest pages
+// Split attention (LLAMA_KV_SPLIT=auto or a fixed fraction, off by default): in decode ubatches the CPU attends over the oldest pages
 // that are not resident, in place in the host store, instead of streaming them; they are the first n_split pages of the
 // layer, one contiguous block per layer. The page table then starts after them, and each layer's attention hands Q to
-// the CPU worker and merges its output and log-sum-exp (ggml_flash_attn_ext_set_split). The CPU's share is that
-// fraction of the pages that would stream; LLAMA_KV_SPLIT_THREADS sets its threads (default 8).
+// the CPU worker and merges its output and log-sum-exp (ggml_flash_attn_ext_set_split). The CPU's share is a fraction
+// of the pages that would stream: fixed, or with auto found by measuring: starting from 0 (no split), a larger share is
+// kept only while it makes decode ubatches faster, so a machine where the split does not pay stays at 0. Nothing
+// splits while every attended page is resident. LLAMA_KV_SPLIT_THREADS sets the CPU threads (default: two thirds of
+// the hardware threads).
 //
 // Stalls: every wait of the copy queue is bounded (LLAMA_KV_STREAM_TIMEOUT seconds, default 30) and aborts with the queue
 // state; the attention's waits trap after 60 s.
@@ -281,8 +284,28 @@ private:
         uint32_t n_rows; // K/V rows the CPU attends: the first n_split pages
         uint32_t n_tok;  // query tokens
     };
-    float                              split_frac    = 0.0f; // LLAMA_KV_SPLIT
+    float                              split_frac    = 0.0f; // LLAMA_KV_SPLIT: the share in use
     int                                split_threads = 8;    // LLAMA_KV_SPLIT_THREADS
+
+    // LLAMA_KV_SPLIT=auto: hill climbing on the time between decode ubatches, in windows of split_window ubatches
+    struct split_tuner {
+        bool                 on       = false;
+        int                  phase    = 0;     // 0: measure the base share, 1: measure a probe, 2: settled
+        float                base     = 0.0f;  // the share kept so far
+        float                probe    = 0.0f;
+        float                dir      = 1.0f;
+        bool                 turned   = false; // the other direction was tried
+        double               t_base   = 0.0;   // us per ubatch at the base share
+        int                  skip     = 0;     // ubatches not counted after a change (graph rebuild)
+        uint32_t             settled  = 0;     // ubatches since settling
+        uint32_t             n_out    = 0;     // streamed pages when settled
+        std::vector<int64_t> samples;
+        int64_t              t_last   = 0;     // time of the last decode prepare
+        uint64_t             n_last   = 0;     // its n_prepared
+    } tuner;
+    static constexpr int   split_window = 16;
+    static constexpr float split_step   = 0.1f;
+    float split_tune(uint32_t n_out, bool decode);
     int64_t                            split_n_head  = 0;    // query heads
     uint32_t                           n_split       = 0;    // pages the CPU attends in the current ubatch
     uint32_t                           split_tag     = 0;    // counts the ubatches that split
