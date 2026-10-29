@@ -1,0 +1,37 @@
+== test-backend-ops FLASH_ATTN_EXT
+      1   4448/4448 tests passed
+== Qwen3.8 MTP 125K
+[2026-10-29 15:24:40] f0-t0: restored: {"id_slot":0,"filename":"split-sweep-sha256-d847e2c1e4aa276e4-125000.bin","n_restored":125370,"n_read":5395437104,"timings":{"restore_ms":3461.722}}
+{"label": "f0-t0", "prompt_tokens": 125068, "wall_s": 9.2, "prefill_tps": 9.4, "decode_tps": 33.6, "draft": "194/388", "needle_found": true, 
+[2026-10-29 15:25:10] fauto-t16: restored: {"id_slot":0,"filename":"split-sweep-sha256-d847e2c1e4aa276e4-125000.bin","n_restored":125370,"n_read":5395437104,"timings":{"restore_ms":3430.314}}
+{"label": "fauto-t16", "prompt_tokens": 125068, "wall_s": 10.1, "prefill_tps": 9.3, "decode_tps": 30.8, "draft": "197/388", "needle_found": true, 
+llama_kv_stream: split: 12032 rows, 5 tokens: waited 34.1 ms for Q (layers 1+), attended 53.8 ms (7.8 GB/s), per ubatch
+llama_kv_stream: split: 5888 rows, 5 tokens: waited 36.6 ms for Q (layers 1+), attended 38.1 ms (5.4 GB/s), per ubatch
+[2026-10-29 15:25:41] f0.1-t16: restored: {"id_slot":0,"filename":"split-sweep-sha256-d847e2c1e4aa276e4-125000.bin","n_restored":125370,"n_read":5395437104,"timings":{"restore_ms":3507.123}}
+{"label": "f0.1-t16", "prompt_tokens": 125068, "wall_s": 8.9, "prefill_tps": 9.4, "decode_tps": 31.7, "draft": "173/360", "needle_found": true, 
+llama_kv_stream: split: 5888 rows, 5 tokens: waited 37.1 ms for Q (layers 1+), attended 34.4 ms (6.0 GB/s), per ubatch
+llama_kv_stream: split: 5888 rows, 5 tokens: waited 36.8 ms for Q (layers 1+), attended 35.8 ms (5.7 GB/s), per ubatch
+== Saluki no drafting 150K
+{"label": "fill@150000", "prompt_tokens": 150070, "wall_s": 399.8, "prefill_tps": 393.4, "decode_tps": 8.9, "draft": "None/None", "needle_found": true, 
+[2026-10-29 15:33:32] saved: {"id_slot":0,"filename":"split-sweep-Underdog-Saluki-27B-1.0--150000.bin","n_saved":150241,"n_written":5705681024,"timings":{"save_ms":30178.835}}
+[2026-10-29 15:33:50] f0-t0: restored: {"id_slot":0,"filename":"split-sweep-Underdog-Saluki-27B-1.0--150000.bin","n_restored":150241,"n_read":5705681024,"timings":{"restore_ms":3581.994}}
+{"label": "f0-t0", "prompt_tokens": 150070, "wall_s": 18.5, "prefill_tps": 13.2, "decode_tps": 8.9, "draft": "None/None", "needle_found": true, 
+[2026-10-29 15:34:26] fauto-t16: restored: {"id_slot":0,"filename":"split-sweep-Underdog-Saluki-27B-1.0--150000.bin","n_restored":150241,"n_read":5705681024,"timings":{"restore_ms":3579.899}}
+{"label": "fauto-t16", "prompt_tokens": 150070, "wall_s": 15.1, "prefill_tps": 14.3, "decode_tps": 10.9, "draft": "None/None", "needle_found": true, 
+llama_kv_stream: split: 26624 rows, 1 tokens: waited 30.9 ms for Q (layers 1+), attended 48.2 ms (19.2 GB/s), per ubatch
+llama_kv_stream: split: 26624 rows, 1 tokens: waited 34.0 ms for Q (layers 1+), attended 44.7 ms (20.7 GB/s), per ubatch
+[2026-10-29 15:34:58] f0.3-t16: restored: {"id_slot":0,"filename":"split-sweep-Underdog-Saluki-27B-1.0--150000.bin","n_restored":150241,"n_read":5705681024,"timings":{"restore_ms":3558.386}}
+{"label": "f0.3-t16", "prompt_tokens": 150070, "wall_s": 14.4, "prefill_tps": 11.0, "decode_tps": 11.5, "draft": "None/None", "needle_found": true, 
+llama_kv_stream: split: 26624 rows, 1 tokens: waited 34.0 ms for Q (layers 1+), attended 44.7 ms (20.8 GB/s), per ubatch
+llama_kv_stream: split: 26624 rows, 1 tokens: waited 34.3 ms for Q (layers 1+), attended 45.6 ms (20.3 GB/s), per ubatch
+llama_kv_stream: split auto: share 0.00: 93.5 ms per ubatch
+llama_kv_stream: split auto: share 0.10: 89.8 ms per ubatch
+llama_kv_stream: split auto: share 0.20: 121.3 ms per ubatch
+llama_kv_stream: split auto: settled at 0.10 (89.8 ms per ubatch, 237 streamed pages)
+llama_kv_stream: split auto: share 0.00: 111.7 ms per ubatch
+llama_kv_stream: split auto: share 0.10: 102.9 ms per ubatch
+llama_kv_stream: split auto: share 0.20: 94.1 ms per ubatch
+llama_kv_stream: split auto: share 0.30: 84.7 ms per ubatch
+llama_kv_stream: split auto: share 0.40: 84.6 ms per ubatch
+llama_kv_stream: split auto: settled at 0.30 (84.7 ms per ubatch, 348 streamed pages)
+CHECK DONE

@@ -9642,19 +9642,23 @@ static void ggml_compute_forward_flash_attn_ext_gqa(
     const int64_t psize      = 2 + DV; // a partial: [M, S, VKQ[DV]]
     const size_t  q_row      = ggml_row_size(k_vec_dot_type, DK);
 
-    // work buffer: partials [row][query head][chunk], then per thread: VKQ [NQI][DV], M and S [NQI], V row, Q rows
+    // work buffer: partials [row][query head][chunk], then per thread: VKQ [NQI][DV], M and S [NQI], a block of V rows
+    // converted to f32 for each KV head [G][GGML_FA_GQA_BLOCK][DV], Q rows
+    constexpr int64_t B = GGML_FA_GQA_BLOCK;
     float * partials = (float *) params->wdata;
-    const int64_t per_thread = NQI*(DV + 2) + DV + (int64_t) ((NQI*q_row + sizeof(float) - 1)/sizeof(float)) + CACHE_LINE_SIZE_F32;
+    const int64_t per_thread = NQI*(DV + 2) + G*B*DV + (int64_t) ((NQI*q_row + sizeof(float) - 1)/sizeof(float)) + CACHE_LINE_SIZE_F32;
     float * tw  = partials + N*neq2*n_chunks*psize + ith*per_thread;
     float * VKQ = tw;
     float * M   = VKQ + NQI*DV;
     float * S   = M + NQI;
     float * V32 = S + NQI;
-    char  * Q_q = (char *) (V32 + DV);
+    char  * Q_q = (char *) (V32 + G*B*DV);
 
     GGML_ASSERT(NQI <= GGML_FA_GQA_MAX_NQ);
     float               slope[GGML_FA_GQA_MAX_NQ];
     const ggml_fp16_t * mrow[GGML_FA_GQA_MAX_NQ];
+    float               P[GGML_FA_GQA_MAX_NQ][B];   // a block's scores, then its softmax weights
+    const float *       vrow[GGML_FA_GQA_MAX_NQ*B]; // [KV head][row] V in f32, nullptr where every query masks the row
 
     for (int64_t item = ith; item < (nek2/G)*n_chunks; item += nth) {
         const int64_t ik20 = (item / n_chunks)*G; // first KV head
@@ -9674,49 +9678,114 @@ static void ggml_compute_forward_flash_attn_ext_gqa(
         }
         memset(VKQ, 0, NQI*DV*sizeof(float));
 
-        for (int64_t ic = ic0; ic < ic1; ++ic) {
-            const char *  k_data = nullptr;
-            const float * v_row  = nullptr;
-            int64_t       ik2    = -1;
-            for (int64_t j = 0; j < NQI; ++j) {
-                if (j % NQ == 0) {
-                    // the next KV head's part of the row
-                    ik2    = ik20 + j / NQ;
-                    k_data = (const char *) k->data + ic*nbk1 + ik2*nbk2;
-                    v_row  = nullptr;
-                }
-                const float mv = mrow[j] ? slope[j]*GGML_CPU_FP16_TO_FP32(mrow[j][ic]) : 0.0f;
-                if (mv == -INFINITY) {
-                    continue;
-                }
-                float s;
-                kq_vec_dot(DK, &s, 0, k_data, 0, Q_q + j*q_row, 0, 1);
-                s = s*scale;
-                if (logit_softcap != 0.0f) {
-                    s = logit_softcap*tanhf(s);
-                }
-                s += mv;
+        // blocks of B K/V rows: the scores of every query vector, one softmax rescale per block, then the V rows added
+        // with the accumulators of up to 8 query vectors held in registers (each V value loaded once for all of them)
+        for (int64_t ib = ic0; ib < ic1; ib += B) {
+            const int64_t nt = std::min(B, ic1 - ib);
 
-                float ms = 1.0f;
-                float vs = 1.0f;
-                if (s > M[j]) {
-                    ms = expf(M[j] - s);
-                    M[j] = s;
-                    ggml_vec_scale_f32(DV, VKQ + j*DV, ms);
-                } else {
-                    vs = expf(s - M[j]);
-                }
-                if (!v_row) {
-                    const char * v_data = (const char *) v->data + ic*nbv1 + ik2*nbv2;
-                    if (v_to_float) {
-                        v_to_float(v_data, V32, DV);
-                        v_row = V32;
-                    } else {
-                        v_row = (const float *) v_data;
+            for (int64_t t = 0; t < nt; ++t) {
+                const int64_t ic = ib + t;
+                // the item's KV heads in row order
+                for (int64_t g = 0; g < G; ++g) {
+                    const int64_t ik2    = ik20 + g;
+                    const char *  k_data = (const char *) k->data + ic*nbk1 + ik2*nbk2;
+                    bool          seen   = false;
+                    for (int64_t j = g*NQ; j < (g + 1)*NQ; ++j) {
+                        const float mv = mrow[j] ? slope[j]*GGML_CPU_FP16_TO_FP32(mrow[j][ic]) : 0.0f;
+                        if (mv == -INFINITY) {
+                            P[j][t] = -INFINITY;
+                            continue;
+                        }
+                        float sv;
+                        kq_vec_dot(DK, &sv, 0, k_data, 0, Q_q + j*q_row, 0, 1);
+                        sv = sv*scale;
+                        if (logit_softcap != 0.0f) {
+                            sv = logit_softcap*tanhf(sv);
+                        }
+                        P[j][t] = sv + mv;
+                        seen    = true;
+                    }
+                    vrow[g*B + t] = nullptr;
+                    if (seen) {
+                        const char * v_data = (const char *) v->data + ic*nbv1 + ik2*nbv2;
+                        if (v_to_float) {
+                            v_to_float(v_data, V32 + (g*B + t)*DV, DV);
+                            vrow[g*B + t] = V32 + (g*B + t)*DV;
+                        } else {
+                            vrow[g*B + t] = (const float *) v_data;
+                        }
                     }
                 }
-                ggml_vec_mad_f32(DV, VKQ + j*DV, v_row, vs);
-                S[j] = S[j]*ms + vs;
+            }
+
+            // online softmax by block: rescale once to the block's new maximum, then the weights
+            for (int64_t j = 0; j < NQI; ++j) {
+                float bm = -INFINITY;
+                for (int64_t t = 0; t < nt; ++t) {
+                    bm = fmaxf(bm, P[j][t]);
+                }
+                if (bm == -INFINITY) {
+                    for (int64_t t = 0; t < nt; ++t) {
+                        P[j][t] = 0.0f;
+                    }
+                    continue;
+                }
+                if (bm > M[j]) {
+                    const float ms = expf(M[j] - bm); // 0 for the first visible block
+                    ggml_vec_scale_f32(DV, VKQ + j*DV, ms);
+                    S[j] *= ms;
+                    M[j]  = bm;
+                }
+                for (int64_t t = 0; t < nt; ++t) {
+                    const float pv = P[j][t] == -INFINITY ? 0.0f : expf(P[j][t] - M[j]);
+                    P[j][t] = pv;
+                    S[j]   += pv;
+                }
+            }
+
+            // VKQ[j] += sum over t of P[j][t]*V[t], with the V rows of query vector j's KV head
+            for (int64_t g = 0; g < G; ++g) {
+                const float * const * vr = vrow + g*B;
+                for (int64_t j0 = g*NQ; j0 < (g + 1)*NQ; j0 += 8) {
+                    const int64_t jn = std::min<int64_t>(8, (g + 1)*NQ - j0);
+                    int64_t d = 0;
+#if defined(GGML_SIMD) && !defined(__ARM_FEATURE_SVE) && !defined(__riscv_v_intrinsic)
+                    for (; d + GGML_F32_EPR <= DV; d += GGML_F32_EPR) {
+                        GGML_F32_VEC acc[8];
+                        for (int64_t a = 0; a < 8; ++a) {
+                            acc[a] = a < jn ? GGML_F32_VEC_LOAD(VKQ + (j0 + a)*DV + d) : GGML_F32_VEC_ZERO;
+                        }
+                        for (int64_t t = 0; t < nt; ++t) {
+                            if (!vr[t]) {
+                                continue;
+                            }
+                            const GGML_F32_VEC vv = GGML_F32_VEC_LOAD(vr[t] + d);
+                            for (int64_t a = 0; a < 8; ++a) {
+                                if (a < jn) {
+                                    acc[a] = GGML_F32_VEC_FMA(acc[a], vv, GGML_F32_VEC_SET1(P[j0 + a][t]));
+                                }
+                            }
+                        }
+                        for (int64_t a = 0; a < 8; ++a) {
+                            if (a < jn) {
+                                GGML_F32_VEC_STORE(VKQ + (j0 + a)*DV + d, acc[a]);
+                            }
+                        }
+                    }
+#endif
+                    // leftover dims (all of them without fixed-width SIMD)
+                    for (; d < DV; ++d) {
+                        for (int64_t a = 0; a < jn; ++a) {
+                            float acc1 = VKQ[(j0 + a)*DV + d];
+                            for (int64_t t = 0; t < nt; ++t) {
+                                if (vr[t]) {
+                                    acc1 += P[j0 + a][t]*vr[t][d];
+                                }
+                            }
+                            VKQ[(j0 + a)*DV + d] = acc1;
+                        }
+                    }
+                }
             }
         }
 

@@ -1,0 +1,22 @@
+0.00.035.678 I srv  llama_server: initializing ...
+0.00.035.693 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)
+0.00.035.989 W srv  llama_server: security: no API key is set and CORS allows all origins (see https://github.com/ggml-org/llama.cpp/pull/25655)
+0.00.037.856 I srv    load_model: loading model '~/models/gguf/underdog-saluki-27b/Underdog-Saluki-27B-1.0-IQ2-mix.gguf'
+0.06.382.525 I cmn          init: llama threadpool init, n_threads = 12
+0.06.525.287 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 163840, kv_unified = 'false'
+0.06.528.671 W srv          init: chat template supports preserving reasoning, it is enabled by default (may use more tokens, disable via --no-reasoning-preserve)
+0.06.528.707 I srv  llama_server: model loaded
+0.06.528.711 I srv  llama_server: listening on http://127.0.0.1:8099
+0.10.134.730 I slot load_slot_ch: id  0 | task -1 | restored 2 context checkpoint(s) from '~/store/llm-cache/slots/split-sweep-Underdog-Saluki-27B-1.0--150000.bin'
+0.10.799.785 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, f_sim_best = 1.000 (> 0.100 thold), f_keep = 0.999
+0.10.799.894 I slot launch_slot_: id  0 | task 1 | processing task, is_child = 0
+0.22.331.697 I slot print_timing: id  0 | task 1 | n_gen =    100, tg =   8.82 t/s, tg_3s =   8.91 t/s
+0.25.346.024 I slot print_timing: id  0 | task 1 | n_gen =    127, tg =   8.85 t/s, tg_3s =   8.96 t/s
+0.28.360.922 I slot print_timing: id  0 | task 1 | n_gen =    154, tg =   8.87 t/s, tg_3s =   8.96 t/s
+0.29.142.549 I slot print_timing: id  0 | task 1 | prompt eval time =     304.09 ms /     4 tokens (   76.02 ms per token,    13.15 tokens per second)
+0.29.142.552 I slot print_timing: id  0 | task 1 |        eval time =   18038.54 ms /   161 tokens (  112.74 ms per token,     8.87 tokens per second)
+0.29.142.553 I slot print_timing: id  0 | task 1 |       total time =   18342.63 ms /   165 tokens
+0.29.142.557 I slot print_timing: id  0 | task 1 |    graphs reused =        160
+0.29.142.558 I slot print_timing: id  0 | task 1 |   graph reallocs =          0    /     0        (same size) / (changed size)
+0.29.146.080 I slot      release: id  0 | task 1 | stop processing: n_tokens = 150241, truncated = 0
+0.29.163.635 I srv    operator(): operator(): cleaning up before exit...

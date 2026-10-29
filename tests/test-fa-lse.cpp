@@ -11,9 +11,11 @@
 //      merge to its full result, and its first part merged with the CPU's second part (the split) equals the CPU's
 //      full result (on an RDNA4 card the q8_0 decode cases run the paged decode kernel). Cases whose GPU
 //      kernel does not write the LSE (the vec and tile kernels) are reported and skipped.
-// With an f16 V cache the kernel accumulates the output in f16 (VKQ16), so the full run and the merged parts round
-// differently by about 1e-3; there the merge must add no error beyond the kernel's own: both are compared with a
-// double-precision output, and the merged error may be at most twice the full run's.
+// The output is also compared with double precision computed from the values the kernel reads (q8_0: K, V and the
+// query quantized and dequantized; f16: K and V rounded to f16). With an f16 V cache the per-head path accumulates in
+// f16, so there the merged error may be at most twice the full run's; the q8_0 output must match within 1e-4 where
+// the grouped-query path runs (it quantizes the query as the reference does), 1e-3 elsewhere.
+// FA_LSE_CPU_ONLY=1 skips the GPU checks (for runs while the GPU is busy).
 
 #include "ggml.h"
 #include "ggml-cpu.h"
@@ -48,6 +50,17 @@ struct fa_case {
 };
 
 static ggml_backend_t g_gpu = nullptr;
+
+// x after a q8_0 round trip, row by row (rows of n values): what the kernel reads for K/V and the converted query
+static std::vector<float> q8_round_trip(const std::vector<float> & x, int64_t n) {
+    std::vector<float>   out(x.size());
+    std::vector<uint8_t> buf(ggml_row_size(GGML_TYPE_Q8_0, n));
+    for (size_t r = 0; r + n <= x.size(); r += n) {
+        ggml_quantize_chunk(GGML_TYPE_Q8_0, &x[r], buf.data(), 0, 1, n, nullptr);
+        ggml_get_type_traits(GGML_TYPE_Q8_0)->to_float(buf.data(), &out[r], n);
+    }
+    return out;
+}
 
 // Runs attention of q over K/V rows [c0, c1) with the matching mask columns; returns output [n_rows][n_head][D] and
 // LSE [n_rows][n_head].
@@ -160,6 +173,14 @@ static int check(const fa_case & c) {
         }
     }
 
+    // the q8_0 round trips of K, V and the query, for the double-precision reference
+    std::vector<float> k_q8, v_q8, q_q8;
+    if (c.type_kv == GGML_TYPE_Q8_0) {
+        k_q8 = q8_round_trip(k, c.D);
+        v_q8 = q8_round_trip(v, c.D);
+        q_q8 = q8_round_trip(q, c.D);
+    }
+
     std::vector<float> o_all, l_all, o1, l1, o2, l2;
     run_fa(c, q, k, v, mask, 0, c.n_kv, scale, o_all, l_all);
     run_fa(c, q, k, v, mask, 0, c.n1, scale, o1, l1);
@@ -185,6 +206,7 @@ static int check(const fa_case & c) {
                 max_dl = std::fmax(max_dl, std::fabs(l_merged - l_all[il]));
             }
             const bool f16_acc = c.type_kv == GGML_TYPE_F16;
+            const bool q8      = c.type_kv == GGML_TYPE_Q8_0;
             for (int64_t d = 0; d < c.D; ++d) {
                 const int64_t io = (r*n_head + h)*c.D + d;
                 const double merged = (wa*o1[io] + wb*o2[io])/(wa + wb);
@@ -196,15 +218,20 @@ static int check(const fa_case & c) {
                     }
                 }
             }
-            if (f16_acc) {
-                // double-precision output from the f16 K/V the kernel reads
+            if (f16_acc || q8) {
+                // double-precision output from the K/V (and for q8_0 the query) as the kernel reads them
                 const int64_t hk = h / c.gqa;
+                auto kv_val = [&](const std::vector<float> & src, const std::vector<float> & src_q8, int64_t i, int64_t d) -> double {
+                    const int64_t at = (i*c.n_head_kv + hk)*c.D + d;
+                    return q8 ? src_q8[at] : ggml_fp16_to_fp32(ggml_fp32_to_fp16(src[at]));
+                };
+                const float * qrow = q8 ? &q_q8[(h*c.n_rows + r)*c.D] : &q[(h*c.n_rows + r)*c.D];
                 std::vector<double> sc(c.n_kv);
                 double mx = -INFINITY;
                 for (int64_t i = 0; i < c.n_kv; ++i) {
                     double dot = 0.0;
                     for (int64_t d = 0; d < c.D; ++d) {
-                        dot += (double) q[(h*c.n_rows + r)*c.D + d]*ggml_fp16_to_fp32(ggml_fp32_to_fp16(k[(i*c.n_head_kv + hk)*c.D + d]));
+                        dot += (double) qrow[d]*kv_val(k, k_q8, i, d);
                     }
                     sc[i] = scale*dot + mask[r*c.n_kv + i];
                     mx = std::fmax(mx, sc[i]);
@@ -215,7 +242,7 @@ static int check(const fa_case & c) {
                     const double w = std::isinf(sc[i]) ? 0.0 : std::exp(sc[i] - mx);
                     sum += w;
                     for (int64_t d = 0; d < c.D; ++d) {
-                        ref[d] += w*ggml_fp16_to_fp32(ggml_fp32_to_fp16(v[(i*c.n_head_kv + hk)*c.D + d]));
+                        ref[d] += w*kv_val(v, v_q8, i, d);
                     }
                 }
                 double e_full = 0.0, e_merged = 0.0;
@@ -325,13 +352,20 @@ static int check(const fa_case & c) {
             bad += gbad;
         }
     }
+    // the grouped-query decode path (up to 64 query vectors per KV head) quantizes the query to q8_0 as the reference
+    // does: 1e-4; the tiled path keeps the query in f32, so the reference differs by its quantization: 1e-3
+    const double q8_tol = c.n_rows*c.gqa <= 64 ? 1e-4 : 1e-3;
+    if (c.type_kv == GGML_TYPE_Q8_0 && !(max_e_full <= q8_tol)) {
+        fprintf(stderr, "  %s: output differs from double precision by %g\n", c.name, max_e_full);
+        bad++;
+    }
     if (max_e_merged > 2.0*max_e_full + 1e-5) {
         fprintf(stderr, "  %s: merged output error %g against double precision, full run %g\n", c.name, max_e_merged, max_e_full);
         bad++;
     }
     printf("%-28s %s  (max |merged - full|: out %.2e, lse %.2e; |lse - double ref| %.2e", c.name, bad ? "FAIL" : "ok",
             max_do, max_dl, max_dref);
-    if (c.type_kv == GGML_TYPE_F16) {
+    if (c.type_kv == GGML_TYPE_F16 || c.type_kv == GGML_TYPE_Q8_0) {
         printf("; out vs double: full %.2e, merged %.2e", max_e_full, max_e_merged);
     }
     printf(")\n");
@@ -340,7 +374,8 @@ static int check(const fa_case & c) {
 
 int main(void) {
     ggml_backend_load_all();
-    g_gpu = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_GPU, nullptr);
+    const char * cpu_only = getenv("FA_LSE_CPU_ONLY");
+    g_gpu = cpu_only && atoi(cpu_only) ? nullptr : ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_GPU, nullptr);
     printf("GPU backend: %s\n", g_gpu ? ggml_backend_name(g_gpu) : "none (CPU checks only)");
     const fa_case cases[] = {
         // name                          type            D   kvh gqa rows  n_kv    n1  masked thr
@@ -353,6 +388,8 @@ int main(void) {
         { "q8_0 5 rows masked",          GGML_TYPE_Q8_0, 256, 4, 6,  5,    2000,   900, true,  12 },
         { "f16 64 rows",                 GGML_TYPE_F16,  128, 2, 4, 64,    1024,   512, false, 12 },
         { "q8_0 32 rows, D=128",         GGML_TYPE_Q8_0, 128, 8, 4, 32,    1500,   333, true,  12 },
+        // head size 100 (not a multiple of the SIMD width): the grouped path's scalar tail; 1037 rows (odd blocks)
+        { "f16 D=100, 3 rows, odd n_kv", GGML_TYPE_F16,  100, 2, 4,  3,    1037,   517, true,  12 },
     };
     int bad = 0;
     for (const auto & c : cases) {

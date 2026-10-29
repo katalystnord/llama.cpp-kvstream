@@ -8,6 +8,7 @@
 
 #define GGML_FA_TILE_Q  64
 #define GGML_FA_TILE_KV 64
+#define GGML_FA_GQA_BLOCK 16 // K/V rows per block of the grouped-query decode path (ops.cpp)
 
 #ifdef __cplusplus
 

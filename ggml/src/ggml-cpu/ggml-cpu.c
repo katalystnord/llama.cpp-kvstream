@@ -3011,14 +3011,17 @@ struct ggml_cplan ggml_graph_plan(
                         const int64_t nek2 = MAX(node->src[1]->ne[2], 1);
                         // (a work item takes several KV heads when they lie side by side in a row: the most that
                         // divide them with at most GGML_FA_GQA_MAX_NQ (64) query vectors, as in ops.cpp)
+                        // (and per KV head of the item a block of GGML_FA_GQA_BLOCK V rows in f32)
                         int64_t NQ = N*(neq2/nek2);
+                        int64_t G  = 1;
                         for (int64_t g = nek2; g > 1; --g) {
                             if (nek2 % g == 0 && NQ*g <= 64) {
-                                NQ *= g;
+                                G = g;
                                 break;
                             }
                         }
-                        size_t gqa = sizeof(float)*(N*neq2*2*n_tasks*(2+DV) + n_tasks*(NQ*(DV + 2 + DK) + DV + CACHE_LINE_SIZE/sizeof(float)));
+                        NQ *= G;
+                        size_t gqa = sizeof(float)*(N*neq2*2*n_tasks*(2+DV) + n_tasks*(NQ*(DV + 2 + DK) + G*GGML_FA_GQA_BLOCK*DV + CACHE_LINE_SIZE/sizeof(float)));
 
                         cur += MAX(MAX(prefill, decode), gqa);
 
