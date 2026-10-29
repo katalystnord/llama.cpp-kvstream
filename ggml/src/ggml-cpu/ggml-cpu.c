@@ -3004,7 +3004,15 @@ struct ggml_cplan ggml_graph_plan(
                         size_t n_chunks = n_tasks;
                         size_t decode   = sizeof(float)*(neq2*n_chunks*(2+DV) + n_tasks*(DK + 2*DV));
 
-                        cur += MAX(prefill, decode);
+                        // Grouped-query decode (ggml_compute_forward_flash_attn_ext_gqa): partials per (query row, query
+                        // head, chunk), at most 2*n_tasks chunks; per thread the f32 accumulators, M and S of a group's
+                        // query vectors, a V row and the query vectors converted for the K dot product
+                        const int64_t N    = node->src[0]->ne[1];
+                        const int64_t nek2 = MAX(node->src[1]->ne[2], 1);
+                        const int64_t NQ   = N*(neq2/nek2);
+                        size_t gqa = sizeof(float)*(N*neq2*2*n_tasks*(2+DV) + n_tasks*(NQ*(DV + 2 + DK) + DV + CACHE_LINE_SIZE/sizeof(float)));
+
+                        cur += MAX(MAX(prefill, decode), gqa);
 
                         // paged K/V are gathered into contiguous copies at the end of the work buffer
                         const struct ggml_tensor * pages = node->src[GGML_FA_SRC_PAGES];
