@@ -385,6 +385,7 @@ public:
     ggml_tensor * self_kv_tag   = nullptr;
     uint64_t      kv_layout     = 0;
     bool          kv_synced     = false;
+    uint32_t      kv_split      = 0; // pages the CPU attends (split attention), which shape the page table
 
     // the attended cells the graph was built for (a compact KQ mask no longer changes with them)
     uint32_t      n_kv          = 0;

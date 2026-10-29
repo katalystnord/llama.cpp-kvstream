@@ -83,6 +83,41 @@ Together about 35 GB/s (24 for the stream alone, 30 with the first kernel). Spli
 150K would take about 77 ms instead of 112: about 13 t/s instead of 8.9, about 1.45x. Arithmetic from rates measured
 under the load the split creates; the split itself is the measurement still to come.
 
+## The split, built (2026-10-29, branch `split-attention`)
+
+How it runs (`LLAMA_KV_SPLIT=fraction`, off by default; `LLAMA_KV_SPLIT_THREADS`, default 8):
+
+- In each decode ubatch (up to 96 query tokens) the stream gives the CPU the oldest pages that are not resident, that
+  fraction of the pages that would stream, while they form one block from the first page. Those pages are not
+  copied, and the GPU's page table starts after them (its mask is a view of the last columns).
+- The HIP paged decode op copies Q to shared host memory and raises a flag, attends over its pages with its log-sum-exp,
+  waits for the CPU's flag, and merges (`pd_split_q`, `pd_split_signal`, `pd_split_wait`, `pd_split_merge`).
+- A CPU worker thread in the stream waits for each layer's Q, runs ggml's CPU flash attention (grouped-query path,
+  log-sum-exp output) over the block in place in the host store, and raises its flag.
+- The op carries the hand-over as `ggml_flash_attn_ext_set_split` (op params grew from 64 to 80 bytes for the pointer);
+  the step tag input has a second entry for it. Backends that cannot merge refuse the op, and the stream then turns the
+  split off with a warning (CUDA today; the CPU half is portable as it is).
+
+First measurements (Saluki, 150K, pool 2420 MiB, no drafting, `kvstream/bench/run-split.sh` and `run-split-sweep.sh`,
+logs `results/rx9070-ryzen5900x/split-*-2026-10-29.log`):
+
+| CPU share : threads | write t/s | CPU attends per token | CPU waits for Q | CPU rate |
+|---|---|---|---|---|
+| no split | 8.9 | | | |
+| 0.2 : 8 | 9.2 | 68 ms | 27 ms | 9.0 GB/s |
+| 0.2 : 12 | 10.1 | 67 ms | 27 ms | 9.1 GB/s |
+| 0.3 : 16 | 8.1 | 94 ms | 22 ms | 9.9 GB/s |
+| 0.4 : 8 | 6.4 | 130 ms | 22 ms | 9.5 GB/s |
+| 0.4 : 12 | 6.0 | 133 ms | 22 ms | 9.3 GB/s |
+
+Exact in practice: with 0.4 : 8, the three 400-token greedy answers were word for word identical to the unsplit ones,
+and the code word was found in every run. Fastest so far 0.2 : 12, +13%. The CPU is the critical path: it attends at
+about 9.5 GB/s whatever the thread count, against 13.9 GB/s for the same kernel beside a stream in the contention
+benchmark and 21.6 alone. Differences from the benchmark, to measure next: the host store interleaves the 4 KV heads in
+each row (the grouped path's work items are (KV head, chunk), so each reads a quarter of every row), and the work comes
+as 16 small passes per token (17,664 rows per layer at 0.2) with the pool woken for each. The waits for Q (22 to 27 ms
+per token) are the GPU's other layers, when the CPU has nothing to do.
+
 ## Prior art (survey 2026-10-28, `~/code/scratch/llm-perf-investigation/research-kv-offload-2026-10-28.md`)
 
 Closest: HGCA (arXiv 2507.03153: GPU dense over recent KV, CPU sparse over the rest, LSE merge; no code found),

@@ -140,7 +140,8 @@ bool ggml_cuda_fattn_paged_prefill_enabled(int device, const ggml_tensor * dst) 
     const ggml_tensor * K     = dst->src[1];
     const bool          paged = dst->src[GGML_FA_SRC_PAGES] != nullptr;
     const int64_t       chunk = (int64_t) pd_prefill_chunk_pages()*PD_PAGE;
-    if (Q->ne[1] <= PD_DECODE_MAX_NB) {
+    // split attention is a decode feature (ggml_cuda_flash_attn_ext_paged_decode)
+    if (Q->ne[1] <= PD_DECODE_MAX_NB || ggml_flash_attn_ext_get_split(dst)) {
         return false;
     }
     // paged K/V needs the runs; contiguous K/V is one run, worth splitting when longer than a chunk (bounds the stock
@@ -204,7 +205,7 @@ size_t ggml_cuda_fattn_paged_prefill_alloc_size(int device, const ggml_tensor * 
 // Launch shape of the decode kernel, and its split partials after dst in dst's allocation.
 struct pd_decode_shape {
     int n_kv, nb, n_heads, M_TILES, R, n_tiles, n_chunks, n_splits, chunks_per_split;
-    size_t dst_size, o_size, ml_size;
+    size_t dst_size, o_size, ml_size, lse_size;
 
     pd_decode_shape(int device, const ggml_tensor * dst) {
         const ggml_tensor * Q     = dst->src[0];
@@ -228,12 +229,63 @@ struct pd_decode_shape {
         dst_size = GGML_PAD(ggml_nbytes(dst), 256);
         o_size   = GGML_PAD((size_t) n_splits * n_heads * n_tiles * R * PD_D * sizeof(float), 256);
         ml_size  = GGML_PAD((size_t) n_splits * n_heads * n_tiles * R * sizeof(float2), 256);
+        // split attention: this part's log-sum-exp, for the merge
+        lse_size = ggml_flash_attn_ext_get_split(dst) ? GGML_PAD((size_t) nb * Q->ne[2] * sizeof(float), 256) : 0;
     }
 };
 
 size_t ggml_cuda_fattn_paged_decode_alloc_size(int device, const ggml_tensor * dst) {
     const pd_decode_shape sh(device, dst);
-    return sh.dst_size + sh.o_size + sh.ml_size;
+    return sh.dst_size + sh.o_size + sh.ml_size + sh.lse_size;
+}
+
+// Split attention (ggml_flash_attn_ext_set_split): Q goes to the other processor before this part attends, and that
+// part's result is merged into dst after it.
+
+// Q [D, nb, n_q_heads] (strided) to q, contiguous
+static __global__ void pd_split_q(const char * __restrict__ Q, const int64_t nb1, const int64_t nb2, float * __restrict__ q) {
+    const int i = blockIdx.x, h = blockIdx.y, t = threadIdx.x;
+    q[((int64_t) h*gridDim.x + i)*PD_D + t] = ((const float *) (Q + i*nb1 + h*nb2))[t];
+    __threadfence_system();
+}
+
+static __global__ void pd_split_signal(const int32_t * tag, uint32_t * q_ready) {
+    __threadfence_system();
+    __hip_atomic_store(q_ready, (uint32_t) tag[1], __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
+}
+
+// bounded like pd_sync::wait: a part that never arrives is a bug
+static __global__ void pd_split_wait(const int32_t * tag, const uint32_t * out_ready) {
+    const uint32_t t = (uint32_t) tag[1];
+    const uint64_t t0 = wall_clock64();
+    while (__hip_atomic_load(out_ready, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM) < t) {
+        __builtin_amdgcn_s_sleep(2);
+        if (wall_clock64() - t0 > PD_SYNC_TIMEOUT) {
+            __builtin_trap();
+        }
+    }
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
+}
+
+// dst row (token i, head h) and lse merged with the other part's row, by log-sum-exp
+static __global__ void pd_split_merge(char * __restrict__ dst, const int64_t nb1, const int64_t nb2, float * __restrict__ lse,
+        const float * __restrict__ out, const float * __restrict__ out_lse) {
+    const int i = blockIdx.x, h = blockIdx.y, t = threadIdx.x;
+    const int64_t row = (int64_t) i*gridDim.y + h;
+    float * acc = (float *) (dst + i*nb2 + h*nb1);
+    const float L = lse[row];
+    const float l = out_lse[row];
+    const float m = fmaxf(L, l);
+    __syncthreads(); // every thread has read lse[row]
+    if (m == -INFINITY) {
+        return; // neither part sees a key
+    }
+    const float wa = L == -INFINITY ? 0.0f : expf(L - m);
+    const float wb = l == -INFINITY ? 0.0f : expf(l - m);
+    acc[t] = ((wa > 0.0f ? wa*acc[t] : 0.0f) + (wb > 0.0f ? wb*out[row*PD_D + t] : 0.0f)) / (wa + wb);
+    if (t == 0) {
+        lse[row] = m + logf(wa + wb);
+    }
 }
 
 void ggml_cuda_flash_attn_ext_paged_decode(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
@@ -261,6 +313,15 @@ void ggml_cuda_flash_attn_ext_paged_decode(ggml_backend_cuda_context & ctx, ggml
     // reserved after dst by ggml_cuda_fattn_paged_decode_alloc_size()
     float  * O_part  = (float *)  ((char *) dst->data + sh.dst_size);
     float2 * ML_part = (float2 *) ((char *) O_part + sh.o_size);
+
+    const ggml_fa_split * split = ggml_flash_attn_ext_get_split(dst);
+    const int32_t * tag = dst->src[GGML_FA_SRC_TAG] ? (const int32_t *) dst->src[GGML_FA_SRC_TAG]->data : nullptr;
+    if (split) {
+        // the other part starts as soon as Q is out
+        pd_split_q<<<dim3(nb, Q->ne[2]), PD_D, 0, stream>>>((const char *) Q->data, Q->nb[1], Q->nb[2], split->q);
+        pd_split_signal<<<1, 1, 0, stream>>>(tag, split->q_ready);
+        CUDA_CHECK(cudaGetLastError());
+    }
 
     const dim3 grid(n_splits, n_heads, n_tiles);
     const int     mask_col0 = (int) ggml_flash_attn_ext_mask_col0(dst);
@@ -290,9 +351,18 @@ void ggml_cuda_flash_attn_ext_paged_decode(ggml_backend_cuda_context & ctx, ggml
     CUDA_CHECK(cudaGetLastError());
     float * lse = nullptr;
     memcpy(&lse, dst->op_params + GGML_FA_PARAM_LSE, sizeof(lse));
+    if (split && !lse) {
+        lse = (float *) ((char *) ML_part + sh.ml_size);
+    }
     pd_combine<<<dim3(nb * PD_GQA, n_heads), PD_D, 0, stream>>>(O_part, ML_part, n_splits, n_tiles * R,
         (char *) dst->data, dst->nb[1], dst->nb[2], sync, lse);
     CUDA_CHECK(cudaGetLastError());
+    if (split) {
+        pd_split_wait<<<1, 1, 0, stream>>>(tag, split->out_ready);
+        pd_split_merge<<<dim3(nb, Q->ne[2]), PD_D, 0, stream>>>((char *) dst->data, dst->nb[1], dst->nb[2], lse,
+            split->out, split->lse);
+        CUDA_CHECK(cudaGetLastError());
+    }
 }
 
 // Merge a part into the running result, by rows (query token, head): acc and part are normalized, lse is per row.

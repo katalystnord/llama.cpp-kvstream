@@ -1627,7 +1627,8 @@ ggml_tensor * llama_kv_cache::build_input_kv_pages(ggml_context * ctx, uint32_t 
         return nullptr;
     }
 
-    ggml_tensor * res = ggml_new_tensor_2d(ctx, GGML_TYPE_I32, n_kv/llama_kv_stream::page_size, layers.size());
+    // without the pages the CPU attends (split attention)
+    ggml_tensor * res = ggml_new_tensor_2d(ctx, GGML_TYPE_I32, n_kv/llama_kv_stream::page_size - stream->split_pages(), layers.size());
     ggml_set_input(res);
     ggml_set_name(res, "attn_inp_kv_pages");
 
@@ -1639,7 +1640,8 @@ ggml_tensor * llama_kv_cache::build_input_kv_tag(ggml_context * ctx) const {
         return nullptr;
     }
 
-    ggml_tensor * res = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, 1);
+    // the copy tag and the split tag
+    ggml_tensor * res = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, 2);
     ggml_set_input(res);
     ggml_set_name(res, "attn_inp_kv_tag");
 
@@ -1817,6 +1819,10 @@ llama_kv_stream_attn llama_kv_cache::get_kv_stream_attn(ggml_context * ctx, ggml
         res.table = ikv;
         if (n_tokens > llama_kv_stream::decode_max_tokens) {
             res.runs = stream->page_runs();
+        }
+        if (stream->split_pages() > 0) {
+            res.split      = stream->split(ikv);
+            res.split_rows = (int64_t) stream->split_pages()*llama_kv_stream::page_size;
         }
         if (stream->synced()) {
             // same layout as the pool views

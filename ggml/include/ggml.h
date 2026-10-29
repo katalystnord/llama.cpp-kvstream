@@ -223,7 +223,7 @@
 #define GGML_MAX_PARAMS         2048
 #define GGML_MAX_SRC            10
 #define GGML_MAX_N_THREADS      512
-#define GGML_MAX_OP_PARAMS      64
+#define GGML_MAX_OP_PARAMS      80
 
 #ifndef GGML_MAX_NAME
 #   define GGML_MAX_NAME        64
@@ -2555,12 +2555,39 @@ extern "C" {
 
     // K/V written by another queue (e.g. a copy engine): the op waits until *ready >= tag[0] before it reads them (only
     // the ring when pages are set) and stores *consumed = tag[0] once it no longer needs them. ready and consumed must be
-    // visible to the host and the backend (e.g. pinned host memory). tag: I32 [1].
+    // visible to the host and the backend (e.g. pinned host memory). tag: I32 [1] or more.
     GGML_API void ggml_flash_attn_ext_set_sync(
             struct ggml_tensor * a,
             struct ggml_tensor * tag,
             const uint32_t     * ready,
             uint32_t           * consumed);
+
+    // Split attention: another processor attends over K/V rows that come before this op's (e.g. the CPU over pages in
+    // host memory), and the op merges that part's result into its own by log-sum-exp. Before it attends, the op copies Q
+    // (f32, [n_embd_k, n_batch, n_head] contiguous) to q and stores *q_ready = tag[1]; after it attends, it waits until
+    // *out_ready >= tag[1] and merges out (f32, the layout of the result, contiguous) and lse (f32, [n_head*n_batch],
+    // at token*n_head + head). The buffers must be visible to the host and the backend; scale is for the other part.
+    struct ggml_fa_split {
+        float          * q;
+        uint32_t       * q_ready;
+        const float    * out;
+        const float    * lse;
+        const uint32_t * out_ready;
+        float            scale;
+    };
+
+    // Per-row log-sum-exp output: lse (f32, [n_head*n_batch] at token*n_head + head, in the backend's memory) receives
+    // log(sum(exp(scale*q.k + mask))) of every row, so that results over disjoint K/V can be merged exactly. Written by
+    // the CPU kernels and by the CUDA/HIP kernels that support it (ggml_cuda_flash_attn_ext_writes_lse).
+    GGML_API void ggml_flash_attn_ext_set_lse(
+            struct ggml_tensor * a,
+            float              * lse);
+
+    // tag: I32 [2] or more, the same tensor as for ggml_flash_attn_ext_set_sync if both are set
+    GGML_API void ggml_flash_attn_ext_set_split(
+            struct ggml_tensor          * a,
+            struct ggml_tensor          * tag,
+            const struct ggml_fa_split  * split);
 
     // TODO: needs to be adapted to ggml_flash_attn_ext
     GGML_API struct ggml_tensor * ggml_flash_attn_back(

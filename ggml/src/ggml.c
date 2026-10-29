@@ -5656,11 +5656,32 @@ void ggml_flash_attn_ext_set_sync(
         const uint32_t     * ready,
         uint32_t           * consumed) {
     GGML_ASSERT(a->op == GGML_OP_FLASH_ATTN_EXT);
-    GGML_ASSERT(tag->type == GGML_TYPE_I32 && ggml_nelements(tag) == 1);
+    GGML_ASSERT(tag->type == GGML_TYPE_I32 && ggml_nelements(tag) >= 1);
     GGML_ASSERT(ready && consumed);
 
     memcpy(a->op_params + GGML_FA_PARAM_READY,    &ready,    sizeof(ready));
     memcpy(a->op_params + GGML_FA_PARAM_CONSUMED, &consumed, sizeof(consumed));
+
+    a->src[GGML_FA_SRC_TAG] = tag;
+}
+
+void ggml_flash_attn_ext_set_lse(
+        struct ggml_tensor * a,
+        float              * lse) {
+    GGML_ASSERT(a->op == GGML_OP_FLASH_ATTN_EXT);
+    memcpy(a->op_params + GGML_FA_PARAM_LSE, &lse, sizeof(lse));
+}
+
+void ggml_flash_attn_ext_set_split(
+        struct ggml_tensor         * a,
+        struct ggml_tensor         * tag,
+        const struct ggml_fa_split * split) {
+    GGML_ASSERT(a->op == GGML_OP_FLASH_ATTN_EXT);
+    GGML_ASSERT(tag->type == GGML_TYPE_I32 && ggml_nelements(tag) >= 2);
+    GGML_ASSERT(!a->src[GGML_FA_SRC_TAG] || a->src[GGML_FA_SRC_TAG] == tag);
+    GGML_ASSERT(split && split->q && split->q_ready && split->out && split->lse && split->out_ready);
+
+    memcpy(a->op_params + GGML_FA_PARAM_SPLIT, &split, sizeof(split));
 
     a->src[GGML_FA_SRC_TAG] = tag;
 }

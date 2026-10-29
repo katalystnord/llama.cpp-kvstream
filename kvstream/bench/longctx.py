@@ -47,6 +47,9 @@ d = post('/v1/chat/completions', {'model': 'x', 'temperature': 0, 'max_tokens': 
 wall = time.time() - t
 ans = d['choices'][0]['message'].get('content') or ''
 tm = d.get('timings', {})
+if os.environ.get('ANSWER_DIR'):  # the whole answer, to compare runs word for word
+    with open(os.path.join(os.environ['ANSWER_DIR'], (LABEL or 'answer') + '.txt'), 'w') as f:
+        f.write(ans)
 print(json.dumps({'label': LABEL, 'prompt_tokens': prompt_tokens, 'wall_s': round(wall, 1),
                   'prefill_tps': round(tm.get('prompt_per_second', 0), 1), 'decode_tps': round(tm.get('predicted_per_second', 0), 1),
                   'draft': '%s/%s' % (tm.get('draft_n_accepted'), tm.get('draft_n')),

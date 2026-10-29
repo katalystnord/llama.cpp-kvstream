@@ -40,6 +40,12 @@
 // Debug: LLAMA_KV_STREAM_DEBUG=rotate (when the pool holds the whole context) moves every resident page through host
 // memory into a rotated slot before every ubatch.
 //
+// Split attention (LLAMA_KV_SPLIT=fraction, off by default): in decode ubatches the CPU attends over the oldest pages
+// that are not resident, in place in the host store, instead of streaming them; they are the first n_split pages of the
+// layer, one contiguous block per layer. The page table then starts after them, and each layer's attention hands Q to
+// the CPU worker and merges its output and log-sum-exp (ggml_flash_attn_ext_set_split). The CPU's share is that
+// fraction of the pages that would stream; LLAMA_KV_SPLIT_THREADS sets its threads (default 8).
+//
 // Stalls: every wait of the copy queue is bounded (LLAMA_KV_STREAM_TIMEOUT seconds, default 30) and aborts with the queue
 // state; the attention's waits trap after 60 s.
 // what one layer attends in a graph (llama_kv_cache::get_kv_stream_attn)
@@ -57,6 +63,11 @@ struct llama_kv_stream_attn {
     ggml_tensor *    ring_v   = nullptr;
     const uint32_t * ready    = nullptr;
     uint32_t *       consumed = nullptr;
+
+    // split attention: the CPU attends the first split_rows K/V rows (the page table starts after them); the graph sets
+    // the attention scale
+    ggml_fa_split * split      = nullptr;
+    int64_t         split_rows = 0;
 };
 
 class llama_kv_stream {
@@ -113,14 +124,19 @@ public:
     // the current ubatch attends pages that stream (its attention waits for the copy engine)
     bool synced() const { return n_streamed > 0; }
 
-    // page table input: I32 [n_kv/page_size, n_layer]; slots of resident pages, -1 - ring index of streamed ones
+    // page table input: I32 [n_kv/page_size - split_pages(), n_layer], from the first page after the CPU's; slots of
+    // resident pages, -1 - ring index of streamed ones
     void set_input_pages(ggml_tensor * dst) const;
 
-    // step tag input: I32 [1]
+    // step tag input: I32 [2], the copy tag and the split tag
     void set_input_tag(ggml_tensor * dst) const;
 
     // runs of the resident attended pages, for gathers built into a graph
     std::vector<run> runs(uint32_t n_kv) const;
+
+    // split attention: the first pages the CPU attends in the current ubatch (0: no split), and layer ikv's hand-over
+    uint32_t split_pages() const { return n_split; }
+    ggml_fa_split * split(int32_t ikv) const { return &split_desc[ikv]; }
 
     // device slot of layer ikv: [n_embd_gqa, kv_size]
     ggml_tensor * slot_k(int32_t ikv) const { return slots[ikv % 2].k; }
@@ -194,6 +210,8 @@ private:
 
     void copier_main();
     void publisher_main();
+    void splitter_main();
+    void split_layer(int32_t ikv, uint32_t n_rows, uint32_t n_tok);
     void drain();
 
     // spin until cond() holds; false if stopping. A wait longer than the timeout is a bug: log the queue state and abort
@@ -256,6 +274,28 @@ private:
     std::atomic<uint64_t>   epoch{0};        // bumped by drain: the host store or the slots may change, prefetches are stale
 
     bool     prefill_paged = false;
+
+    // split attention
+    struct split_job {
+        uint32_t tag;
+        uint32_t n_rows; // K/V rows the CPU attends: the first n_split pages
+        uint32_t n_tok;  // query tokens
+    };
+    float                              split_frac    = 0.0f; // LLAMA_KV_SPLIT
+    int                                split_threads = 8;    // LLAMA_KV_SPLIT_THREADS
+    int64_t                            split_n_head  = 0;    // query heads
+    uint32_t                           n_split       = 0;    // pages the CPU attends in the current ubatch
+    uint32_t                           split_tag     = 0;    // counts the ubatches that split
+    mutable std::vector<ggml_fa_split> split_desc;           // [n_layer]
+    float *                            split_q       = nullptr; // shared buffers, per layer
+    float *                            split_out     = nullptr;
+    float *                            split_lse     = nullptr;
+    uint32_t *                         split_flags   = nullptr; // q_ready[n_layer], out_ready[n_layer]
+    std::thread                        splitter;
+    std::condition_variable            split_cv;
+    std::deque<split_job>              split_jobs;
+    ggml_threadpool *                  split_pool    = nullptr;
+    std::vector<uint8_t>               split_work;
 
     bool     debug_rotate = false;
 

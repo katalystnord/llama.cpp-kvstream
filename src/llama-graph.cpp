@@ -606,7 +606,7 @@ void llm_graph_input_attn_kv::set_input(const llama_ubatch * ubatch) {
 // KV streaming: gathers are built for one page layout, and the attention waits only if pages stream
 static bool can_reuse_kv_stream(const llm_graph_input_attn_kv * inp, const llama_kv_cache_context * mctx) {
     const llama_kv_stream * stream = mctx->get_kv_stream();
-    return !stream || (inp->kv_synced == stream->synced() &&
+    return !stream || (inp->kv_synced == stream->synced() && inp->kv_split == stream->split_pages() &&
             (inp->kv_layout == stream->layout() || inp->self_k_idxs->ne[0] <= llama_kv_stream::decode_max_tokens ||
              stream->paged_prefill()));
 }
@@ -3236,6 +3236,7 @@ static std::unique_ptr<llm_graph_input_attn_kv> build_attn_inp_kv_impl(
     if (const llama_kv_stream * stream = mctx_cur->get_kv_stream()) {
         inp->kv_layout = stream->layout();
         inp->kv_synced = stream->synced();
+        inp->kv_split  = stream->split_pages();
     }
 
     return inp;
@@ -3313,6 +3314,16 @@ ggml_tensor * llm_graph_context::build_attn(
 
     ggml_tensor * kq_mask = inp->get_kq_mask();
 
+    // split attention: the GPU attends the rows after the CPU's, so its mask covers at most those (the CPU's rows are
+    // older than every query token, so visible)
+    if (kv_attn.split) {
+        const int64_t n_gpu = (int64_t) mctx_cur->get_n_kv() - kv_attn.split_rows;
+        if (kq_mask->ne[0] > n_gpu) {
+            kq_mask = ggml_view_4d(ctx0, kq_mask, n_gpu, kq_mask->ne[1], kq_mask->ne[2], kq_mask->ne[3],
+                    kq_mask->nb[1], kq_mask->nb[2], kq_mask->nb[3], (kq_mask->ne[0] - n_gpu)*ggml_element_size(kq_mask));
+        }
+    }
+
     ggml_tensor * cur = build_attn_mha(q, k, v, kq_b, kq_mask, sinks, v_mla, 0, kq_scale, il);
     cb(cur, "kqv_out", il);
 
@@ -3334,6 +3345,11 @@ ggml_tensor * llm_graph_context::build_attn(
         }
         if (kv_attn.ready) {
             ggml_flash_attn_ext_set_sync(fa.tensor, inp->self_kv_tag, kv_attn.ready, kv_attn.consumed);
+            ggml_build_forward_expand(gf, inp->self_kv_tag);
+        }
+        if (kv_attn.split) {
+            kv_attn.split->scale = kq_scale;
+            ggml_flash_attn_ext_set_split(fa.tensor, inp->self_kv_tag, kv_attn.split);
             ggml_build_forward_expand(gf, inp->self_kv_tag);
         }
     }

@@ -1,0 +1,26 @@
+0.00.035.262 I srv  llama_server: initializing ...
+0.00.035.274 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)
+0.00.035.573 W srv  llama_server: security: no API key is set and CORS allows all origins (see https://github.com/ggml-org/llama.cpp/pull/25655)
+0.00.037.439 I srv    load_model: loading model '~/models/gguf/underdog-saluki-27b/Underdog-Saluki-27B-1.0-IQ2-mix.gguf'
+0.08.558.704 I cmn          init: llama threadpool init, n_threads = 12
+0.08.723.705 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 163840, kv_unified = 'false'
+0.08.727.095 W srv          init: chat template supports preserving reasoning, it is enabled by default (may use more tokens, disable via --no-reasoning-preserve)
+0.08.727.133 I srv  llama_server: model loaded
+0.08.727.137 I srv  llama_server: listening on http://127.0.0.1:8099
+0.13.644.604 I slot load_slot_ch: id  0 | task -1 | restored 2 context checkpoint(s) from '~/store/llm-cache/slots/split-sweep-150000.bin'
+0.14.399.902 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, f_sim_best = 1.000 (> 0.100 thold), f_keep = 0.999
+0.14.400.015 I slot launch_slot_: id  0 | task 1 | processing task, is_child = 0
+llama_kv_stream: split: 17664 rows, 1 tokens: waited 27.2 ms for Q (layers 1+), attended 73.5 ms (8.4 GB/s), per ubatch
+llama_kv_stream: split: 17664 rows, 1 tokens: waited 25.7 ms for Q (layers 1+), attended 74.5 ms (8.3 GB/s), per ubatch
+llama_kv_stream: split: 17664 rows, 1 tokens: waited 24.0 ms for Q (layers 1+), attended 115.0 ms (5.3 GB/s), per ubatch
+0.26.448.529 I slot print_timing: id  0 | task 1 | n_gen =    100, tg =   8.63 t/s, tg_3s =   8.72 t/s
+llama_kv_stream: split: 17664 rows, 1 tokens: waited 26.5 ms for Q (layers 1+), attended 68.2 ms (9.0 GB/s), per ubatch
+0.29.506.440 I slot print_timing: id  0 | task 1 | n_gen =    131, tg =   8.95 t/s, tg_3s =  10.14 t/s
+llama_kv_stream: split: 17664 rows, 1 tokens: waited 26.7 ms for Q (layers 1+), attended 67.1 ms (9.2 GB/s), per ubatch
+0.32.427.141 I slot print_timing: id  0 | task 1 | prompt eval time =     579.07 ms /     4 tokens (  144.77 ms per token,     6.91 tokens per second)
+0.32.427.145 I slot print_timing: id  0 | task 1 |        eval time =   17448.03 ms /   161 tokens (  109.05 ms per token,     9.17 tokens per second)
+0.32.427.146 I slot print_timing: id  0 | task 1 |       total time =   18027.10 ms /   165 tokens
+0.32.427.150 I slot print_timing: id  0 | task 1 |    graphs reused =        160
+0.32.427.153 I slot print_timing: id  0 | task 1 |   graph reallocs =          0    /     0        (same size) / (changed size)
+0.32.431.151 I slot      release: id  0 | task 1 | stop processing: n_tokens = 150241, truncated = 0
+0.32.448.583 I srv    operator(): operator(): cleaning up before exit...

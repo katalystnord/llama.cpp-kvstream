@@ -864,6 +864,10 @@ bool ggml_cuda_flash_attn_ext_supported(int device, const ggml_tensor * dst) {
     if (ggml_flash_attn_ext_mask_col0(dst) > 0 && ggml_get_op_params_i32(dst, 4) != 0) {
         return false;
     }
+    // only the paged decode kernel merges a split part
+    if (ggml_flash_attn_ext_get_split(dst)) {
+        return ggml_cuda_fattn_paged_decode_enabled(device, dst);
+    }
     if (dst->src[GGML_FA_SRC_PAGES]) {
         return ggml_cuda_fattn_paged_prefill_enabled(device, dst) || ggml_cuda_fattn_paged_decode_enabled(device, dst);
     }

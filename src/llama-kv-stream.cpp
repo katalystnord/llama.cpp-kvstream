@@ -2,7 +2,10 @@
 
 #include "llama-impl.h"
 
+#include "ggml-cpu.h"
+
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <stdexcept>
@@ -74,6 +77,13 @@ llama_kv_stream::llama_kv_stream(const std::vector<layer> & layers, uint32_t n_s
     if (const char * timeout = getenv("LLAMA_KV_STREAM_TIMEOUT")) {
         timeout_us = (int64_t) (atof(timeout)*1e6);
     }
+    if (const char * frac = getenv("LLAMA_KV_SPLIT")) {
+        split_frac = std::clamp((float) atof(frac), 0.0f, 1.0f);
+    }
+    if (const char * threads = getenv("LLAMA_KV_SPLIT_THREADS")) {
+        split_threads = std::max(1, atoi(threads));
+    }
+    split_desc.resize(layers.size());
     if (debug_rotate && n_slots < n_pages) {
         LLAMA_LOG_WARN("%s: LLAMA_KV_STREAM_DEBUG=rotate needs a pool that holds the context, ignored\n", __func__);
         debug_rotate = false;
@@ -98,11 +108,18 @@ llama_kv_stream::~llama_kv_stream() {
         stop = true;
     }
     cv.notify_all();
+    split_cv.notify_all();
     if (copier.joinable()) {
         copier.join();
     }
     if (publisher.joinable()) {
         publisher.join();
+    }
+    if (splitter.joinable()) {
+        splitter.join();
+    }
+    if (split_pool) {
+        ggml_threadpool_free(split_pool);
     }
     for (auto & j : jobs) {
         if (j.wb) {
@@ -158,7 +175,7 @@ void llama_kv_stream::set_backend(ggml_backend_t backend, int64_t n_head) {
 
     // does the backend's attention take paged K/V for a prefill ubatch too? then prefill needs no gathers
     ggml_init_params params = {
-        /*.mem_size   =*/ 8*ggml_tensor_overhead(),
+        /*.mem_size   =*/ 16*ggml_tensor_overhead(),
         /*.mem_buffer =*/ nullptr,
         /*.no_alloc   =*/ true,
     };
@@ -186,6 +203,45 @@ void llama_kv_stream::set_backend(ggml_backend_t backend, int64_t n_head) {
 
     prefill_paged = ggml_backend_supports_op(backend, fa);
     LLAMA_LOG_INFO("%s: prefill attends %s\n", __func__, prefill_paged ? "the pages directly" : "gathers of the pages");
+
+    // split attention: does the backend's decode attention merge a part from the CPU?
+    if (split_frac > 0.0f && !split_q) {
+        bool ok = ce && prefill_paged && !debug_rotate;
+        if (ok) {
+            ggml_tensor * q1   = ggml_new_tensor_4d(ctx.get(), GGML_TYPE_F32, d, 1, n_head, 1);
+            ggml_tensor * m1   = ggml_new_tensor_4d(ctx.get(), GGML_TYPE_F16, page_size, 1, 1, 1);
+            ggml_tensor * fa1  = ggml_flash_attn_ext(ctx.get(), q1, heads(pk), heads(pv), m1, 1.0f, 0.0f, 0.0f);
+            ggml_tensor * tag2 = ggml_new_tensor_1d(ctx.get(), GGML_TYPE_I32, 2);
+            float    probe_f = 0.0f;
+            uint32_t probe_u = 0;
+            const ggml_fa_split probe_split = { &probe_f, &probe_u, &probe_f, &probe_f, &probe_u, 1.0f };
+            ggml_flash_attn_ext_set_pages(fa1, pages, 0, page_size, nullptr, nullptr);
+            ggml_flash_attn_ext_set_split(fa1, tag2, &probe_split);
+            ggml_prec_set_acc(fa1, GGML_PREC_F32);
+            ok = ggml_backend_supports_op(backend, fa1);
+        }
+        if (ok) {
+            const size_t n_layer = layers.size();
+            const size_t rows    = (size_t) decode_max_tokens*n_head; // (query token, head) rows per layer
+            split_n_head = n_head;
+            split_q     = (float *)    ce_iface->alloc_shared(ce, n_layer*rows*d*sizeof(float));
+            split_out   = (float *)    ce_iface->alloc_shared(ce, n_layer*rows*d*sizeof(float));
+            split_lse   = (float *)    ce_iface->alloc_shared(ce, n_layer*rows*sizeof(float));
+            split_flags = (uint32_t *) ce_iface->alloc_shared(ce, 2*n_layer*sizeof(uint32_t));
+            for (size_t ikv = 0; ikv < n_layer; ++ikv) {
+                split_desc[ikv] = { split_q + ikv*rows*d, split_flags + ikv, split_out + ikv*rows*d, split_lse + ikv*rows,
+                    split_flags + n_layer + ikv, split_desc[ikv].scale };
+            }
+            LLAMA_LOG_INFO("%s: split attention: the CPU (%d threads) attends %.0f%% of the pages that would stream, "
+                    "shared buffers %.2f MiB\n", __func__, split_threads, 100.0*split_frac,
+                    n_layer*rows*(2*d + 1)*sizeof(float)/1024.0/1024.0);
+        } else {
+            LLAMA_LOG_WARN("%s: LLAMA_KV_SPLIT is set, but %s; split attention is off\n", __func__,
+                    !ce ? "no pages stream" : !prefill_paged ? "the backend does not attend pages directly" :
+                    debug_rotate ? "LLAMA_KV_STREAM_DEBUG=rotate is set" : "the backend's attention does not merge a CPU part");
+            split_frac = 0.0f;
+        }
+    }
 
     // Without gathers, a slot only holds the pages that stream, packed: the attended pages that are not resident. The
     // pool is full of attended pages whenever any page streams (free slots take attended pages first, and pages outside
@@ -338,6 +394,21 @@ void llama_kv_stream::prepare(const std::vector<uint32_t> & cells, uint32_t n_kv
     std::fill(page_ring.begin(), page_ring.end(), -1);
     n_streamed = 0;
 
+    // split attention: the CPU takes its share of the pages that would stream, the oldest ones, while they form one
+    // block from the first page (the oldest pages are the first to leave the pool, so they usually do)
+    n_split = 0;
+    if (split_q && cells.size() <= decode_max_tokens) {
+        uint32_t n_lead = 0;
+        while (n_lead < n_att && page_slot[n_lead] < 0) {
+            n_lead++;
+        }
+        uint32_t n_out = 0;
+        for (uint32_t p = 0; p < n_att; ++p) {
+            n_out += page_slot[p] < 0;
+        }
+        n_split = std::min(n_lead, (uint32_t) (split_frac*n_out));
+    }
+
     std::vector<run> copies;
     for (uint32_t p = 0; p < n_att; ++p) {
         if (page_slot[p] >= 0) {
@@ -345,6 +416,9 @@ void llama_kv_stream::prepare(const std::vector<uint32_t> & cells, uint32_t n_kv
         }
         if (!saved[p]) {
             zero_host(p);
+        }
+        if (p < n_split) {
+            continue; // the CPU reads it in the host store
         }
         page_ring[p] = n_streamed++;
         const uint32_t dst = decode ? page_ring[p] : p;
@@ -369,6 +443,18 @@ void llama_kv_stream::prepare(const std::vector<uint32_t> & cells, uint32_t n_kv
         }
     }
     runs_desc = { (int32_t) run_list.size(), run_list.data() };
+
+    if (n_split > 0) {
+        split_tag++;
+        {
+            std::lock_guard<std::mutex> lock(mtx);
+            split_jobs.push_back({ split_tag, n_split*page_size, (uint32_t) cells.size() });
+        }
+        split_cv.notify_all();
+        if (!splitter.joinable()) {
+            splitter = std::thread([this]() { splitter_main(); });
+        }
+    }
 
     if (n_streamed == 0) {
         return;
@@ -565,6 +651,85 @@ void llama_kv_stream::publisher_main() {
     }
 }
 
+void llama_kv_stream::splitter_main() {
+    ggml_threadpool_params tpp = ggml_threadpool_params_default(split_threads);
+    split_pool = ggml_threadpool_new(&tpp);
+
+    // LLAMA_KV_SPLIT_DEBUG: per 32 ubatches, the time the worker waited for Q and the time it attended, per ubatch
+    const bool debug = getenv("LLAMA_KV_SPLIT_DEBUG") != nullptr;
+    int64_t t_wait = 0, t_attend = 0, n_done = 0;
+
+    const int32_t n_layer = (int32_t) layers.size();
+    for (;;) {
+        split_job job;
+        {
+            std::unique_lock<std::mutex> lock(mtx);
+            split_cv.wait(lock, [&]() { return stop || !split_jobs.empty(); });
+            if (stop) {
+                return;
+            }
+            job = split_jobs.front();
+            split_jobs.pop_front();
+        }
+        // the layers in graph order: each starts when the GPU has handed over its Q
+        for (int32_t ikv = 0; ikv < n_layer; ++ikv) {
+            const int64_t t0 = ggml_time_us();
+            if (!wait_for([&]() { return __atomic_load_n(split_flags + ikv, __ATOMIC_ACQUIRE) >= job.tag; },
+                    "Q for split attention", ikv, job.tag)) {
+                return;
+            }
+            const int64_t t1 = ggml_time_us();
+            split_layer(ikv, job.n_rows, job.n_tok);
+            __atomic_store_n(split_flags + n_layer + ikv, job.tag, __ATOMIC_RELEASE);
+            // the wait for layer 0 includes the time between ubatches
+            t_wait   += ikv > 0 ? t1 - t0 : 0;
+            t_attend += ggml_time_us() - t1;
+        }
+        if (debug && ++n_done % 32 == 0) {
+            fprintf(stderr, "llama_kv_stream: split: %u rows, %u tokens: waited %.1f ms for Q (layers 1+), attended "
+                    "%.1f ms (%.1f GB/s), per ubatch\n", job.n_rows, job.n_tok, t_wait/32e3, t_attend/32e3,
+                    (double) job.n_rows*n_layer*(row_size(0, false) + row_size(0, true))/(t_attend/32e6)/1e9);
+            t_wait = t_attend = 0;
+        }
+    }
+}
+
+// attention of Q over the layer's first n_rows K/V rows, in place in the host store, into the shared buffers
+void llama_kv_stream::split_layer(int32_t ikv, uint32_t n_rows, uint32_t n_tok) {
+    const int64_t d    = 256;
+    const size_t  rows = (size_t) decode_max_tokens*split_n_head;
+
+    ggml_init_params params = {
+        /*.mem_size   =*/ 16*ggml_tensor_overhead() + ggml_graph_overhead_custom(16, false),
+        /*.mem_buffer =*/ nullptr,
+        /*.no_alloc   =*/ true,
+    };
+    ggml_context_ptr ctx { ggml_init(params) };
+
+    auto heads = [&](bool is_v) {
+        const ggml_tensor * pool = is_v ? layers[ikv].v : layers[ikv].k;
+        ggml_tensor * t = ggml_new_tensor_2d(ctx.get(), pool->type, pool->ne[0], n_rows);
+        t->data = host(ikv, is_v, 0);
+        return ggml_view_3d(ctx.get(), t, d, n_rows, pool->ne[0]/d, t->nb[1], ggml_row_size(t->type, d), 0);
+    };
+    ggml_tensor * q = ggml_new_tensor_3d(ctx.get(), GGML_TYPE_F32, d, n_tok, split_n_head);
+    q->data = split_q + ikv*rows*d;
+
+    ggml_tensor * fa = ggml_flash_attn_ext(ctx.get(), q, heads(false), heads(true), nullptr, split_desc[ikv].scale, 0.0f, 0.0f);
+    fa->data = split_out + ikv*rows*d;
+    ggml_flash_attn_ext_set_lse(fa, split_lse + ikv*rows);
+
+    ggml_cgraph * gf = ggml_new_graph_custom(ctx.get(), 16, false);
+    ggml_build_forward_expand(gf, fa);
+
+    ggml_cplan plan = ggml_graph_plan(gf, split_threads, split_pool);
+    if (plan.work_size > split_work.size()) {
+        split_work.resize(plan.work_size);
+    }
+    plan.work_data = split_work.data();
+    ggml_graph_compute(gf, &plan);
+}
+
 void llama_kv_stream::drain() {
     if (!copier.joinable()) {
         return;
@@ -587,10 +752,12 @@ void llama_kv_stream::set_input_pages(ggml_tensor * dst) const {
     GGML_ASSERT(ggml_backend_buffer_is_host(dst->buffer));
     GGML_ASSERT(dst->type == GGML_TYPE_I32 && dst->ne[1] == (int64_t) layers.size());
 
+    // the CPU's pages come first and are not in the table
     int32_t * data = (int32_t *) dst->data;
-    for (int64_t p = 0; p < dst->ne[0]; ++p) {
+    for (int64_t i = 0; i < dst->ne[0]; ++i) {
+        const int64_t p = i + n_split;
         GGML_ASSERT(page_slot[p] >= 0 || page_ring[p] >= 0);
-        data[p] = page_slot[p] >= 0 ? page_slot[p] : -1 - page_ring[p];
+        data[i] = page_slot[p] >= 0 ? page_slot[p] : -1 - page_ring[p];
     }
     for (int64_t l = 1; l < dst->ne[1]; ++l) {
         std::copy(data, data + dst->ne[0], data + l*dst->ne[0]);
@@ -599,7 +766,9 @@ void llama_kv_stream::set_input_pages(ggml_tensor * dst) const {
 
 void llama_kv_stream::set_input_tag(ggml_tensor * dst) const {
     GGML_ASSERT(ggml_backend_buffer_is_host(dst->buffer));
-    *(int32_t *) dst->data = (int32_t) tag;
+    GGML_ASSERT(ggml_nelements(dst) >= 2);
+    ((int32_t *) dst->data)[0] = (int32_t) tag;
+    ((int32_t *) dst->data)[1] = (int32_t) split_tag;
 }
 
 std::vector<llama_kv_stream::run> llama_kv_stream::runs(uint32_t n_kv) const {
