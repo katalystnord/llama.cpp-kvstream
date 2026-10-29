@@ -1,0 +1,28 @@
+0.00.039.801 I srv  llama_server: initializing ...
+0.00.039.810 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)
+0.00.040.076 W srv  llama_server: security: no API key is set and CORS allows all origins (see https://github.com/ggml-org/llama.cpp/pull/25655)
+0.00.041.926 I srv    load_model: loading model '~/models/ollama/blobs/sha256-d847e2c1e4aa276e4b7b8e9ad7628050e61e165d49ab995407bc36677a6f3864'
+0.08.308.656 I cmn          init: llama threadpool init, n_threads = 12
+0.08.407.848 I common_speculative_init_result: creating MTP draft context against the target model '~/models/ollama/blobs/sha256-d847e2c1e4aa276e4b7b8e9ad7628050e61e165d49ab995407bc36677a6f3864'
+0.08.432.623 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 163840, kv_unified = 'false'
+0.08.484.690 W srv          init: chat template supports preserving reasoning, it is enabled by default (may use more tokens, disable via --no-reasoning-preserve)
+0.08.484.727 I srv  llama_server: model loaded
+0.08.484.733 I srv  llama_server: listening on http://127.0.0.1:8099
+0.15.024.643 I slot load_slot_ch: id  0 | task -1 | restored 2 context checkpoint(s) from '~/store/llm-cache/slots/split-sweep-sha256-d847e2c1e4aa276e4-125000.bin'
+0.15.076.969 I slot load_slot_ch: id  0 | task -1 | restored the draft context state (263.030 MiB)
+0.15.272.053 I slot load_slot_dr: id  0 | task -1 | restored the draft state (263.031 MiB) from '~/store/llm-cache/slots/split-sweep-sha256-d847e2c1e4aa276e4-125000.bin'
+0.15.853.881 I slot get_availabl: id  0 | task -1 | selected slot by LCP similarity, f_sim_best = 1.000 (> 0.100 thold), f_keep = 0.998
+0.15.854.054 I slot launch_slot_: id  0 | task 1 | processing task, is_child = 0
+llama_kv_stream: split auto: share 0.00: 23.0 ms per token
+0.20.331.798 I slot print_timing: id  0 | task 1 | n_gen =    116, tg =  38.09 t/s, tg_3s =  38.42 t/s
+llama_kv_stream: split auto: share 0.10: 31.6 ms per token
+llama_kv_stream: split auto: settled at 0.00 (23.0 ms per token, 237 streamed pages)
+0.23.406.609 I slot print_timing: id  0 | task 1 | n_gen =    210, tg =  34.29 t/s, tg_3s =  30.57 t/s
+0.25.943.427 I slot print_timing: id  0 | task 1 | prompt eval time =    1458.10 ms /     4 tokens (  364.52 ms per token,     2.74 tokens per second)
+0.25.943.430 I slot print_timing: id  0 | task 1 |        eval time =    8631.07 ms /   296 tokens (   29.26 ms per token,    34.18 tokens per second)
+0.25.943.431 I slot print_timing: id  0 | task 1 |       total time =   10089.17 ms /   300 tokens
+0.25.943.435 I slot print_timing: id  0 | task 1 |    graphs reused =         93
+0.25.943.435 I slot print_timing: id  0 | task 1 |   graph reallocs =          4    /     0        (same size) / (changed size)
+0.25.943.439 I slot print_timing: id  0 | task 1 | draft acceptance = 0.51031 (  198 accepted /   388 generated), mean len =  3.04
+0.25.946.268 I slot      release: id  0 | task 1 | stop processing: n_tokens = 125374, truncated = 0
+0.25.963.502 I srv    operator(): operator(): cleaning up before exit...

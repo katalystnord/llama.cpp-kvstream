@@ -422,7 +422,7 @@ void llama_kv_stream::prepare(const std::vector<uint32_t> & cells, uint32_t n_kv
         for (uint32_t p = 0; p < n_att; ++p) {
             n_out += page_slot[p] < 0;
         }
-        const float share = tuner.on ? split_tune(n_out, decode_ub) : split_frac;
+        const float share = tuner.on ? split_tune(n_out, decode_ub, *std::min_element(cells.begin(), cells.end())) : split_frac;
         if (decode_ub) {
             n_split = std::min(n_lead, (uint32_t) (share*n_out));
         }
@@ -671,22 +671,26 @@ void llama_kv_stream::publisher_main() {
 }
 
 // LLAMA_KV_SPLIT=auto: the share for the coming ubatch. The time between two consecutive decode prepares is the previous
-// ubatch's (with the host's sampling); it is counted for the share that ubatch used. Windows of split_window ubatches
-// after the first two (graph rebuild); a window's time is the mean of its middle half.
-float llama_kv_stream::split_tune(uint32_t n_out, bool decode) {
+// ubatch's (with the host's sampling), and the distance between their first cells is the tokens it kept (the accepted
+// drafts plus one when verifying drafts: rejected cells are written again). Both count for the share that ubatch
+// used. Windows of split_window ubatches after the first two (graph rebuild); a window's time per token is its total
+// time over its total tokens, without ubatches slower than three times the median.
+float llama_kv_stream::split_tune(uint32_t n_out, bool decode, uint32_t cell0) {
     auto & t = tuner;
     const int64_t now = ggml_time_us();
-    const bool counted = decode && t.n_last + 1 == n_prepared && n_out > 0;
+    const bool counted = decode && t.n_last + 1 == n_prepared && n_out > 0 &&
+        cell0 > t.c_last && cell0 - t.c_last <= decode_max_tokens;
     if (counted) {
         if (t.skip > 0) {
             t.skip--;
         } else {
-            t.samples.push_back(now - t.t_last);
+            t.samples.push_back({ now - t.t_last, cell0 - t.c_last });
         }
     }
     if (decode) {
         t.t_last = now;
         t.n_last = n_prepared;
+        t.c_last = cell0;
     }
     if (n_out == 0) {
         return 0.0f; // every attended page is resident: nothing to split
@@ -711,13 +715,21 @@ float llama_kv_stream::split_tune(uint32_t n_out, bool decode) {
         return cur;
     }
 
-    std::vector<int64_t> s = t.samples;
-    std::sort(s.begin(), s.end());
-    double mean = 0.0;
-    for (int i = split_window/4; i < split_window - split_window/4; ++i) {
-        mean += s[i];
+    std::vector<int64_t> dts;
+    for (const auto & x : t.samples) {
+        dts.push_back(x.first);
     }
-    mean /= split_window/2;
+    std::nth_element(dts.begin(), dts.begin() + dts.size()/2, dts.end());
+    const int64_t median = dts[dts.size()/2];
+    int64_t  sum_us  = 0;
+    uint64_t sum_tok = 0;
+    for (const auto & x : t.samples) {
+        if (x.first <= 3*median) {
+            sum_us  += x.first;
+            sum_tok += x.second;
+        }
+    }
+    const double mean = (double) sum_us/std::max<uint64_t>(sum_tok, 1); // us per token
     t.samples.clear();
     t.skip = 2;
 
@@ -726,7 +738,7 @@ float llama_kv_stream::split_tune(uint32_t n_out, bool decode) {
         t.settled = 0;
         t.n_out   = n_out;
         if (getenv("LLAMA_KV_SPLIT_DEBUG")) {
-            fprintf(stderr, "llama_kv_stream: split auto: settled at %.2f (%.1f ms per ubatch, %u streamed pages)\n",
+            fprintf(stderr, "llama_kv_stream: split auto: settled at %.2f (%.1f ms per token, %u streamed pages)\n",
                     t.base, t.t_base/1e3, n_out);
         }
         return t.base;
@@ -742,7 +754,7 @@ float llama_kv_stream::split_tune(uint32_t n_out, bool decode) {
     };
 
     if (getenv("LLAMA_KV_SPLIT_DEBUG")) {
-        fprintf(stderr, "llama_kv_stream: split auto: share %.2f: %.1f ms per ubatch\n", cur, mean/1e3);
+        fprintf(stderr, "llama_kv_stream: split auto: share %.2f: %.1f ms per token\n", cur, mean/1e3);
     }
     if (t.phase == 0) {
         t.t_base = mean;
@@ -776,6 +788,12 @@ void llama_kv_stream::splitter_main() {
 
     // LLAMA_KV_SPLIT_DEBUG: per 32 ubatches, the time the worker waited for Q and the time it attended, per ubatch
     const bool debug = getenv("LLAMA_KV_SPLIT_DEBUG") != nullptr;
+    // LLAMA_KV_SPLIT_NOOP, for measuring only: the CPU's part is skipped and empty, so the output is WRONG; the speed
+    // is the most the split could give at that share if the CPU part took no time
+    const bool noop = getenv("LLAMA_KV_SPLIT_NOOP") != nullptr;
+    if (noop) {
+        fprintf(stderr, "llama_kv_stream: LLAMA_KV_SPLIT_NOOP: the CPU's part is skipped, results are wrong (measuring only)\n");
+    }
     int64_t t_wait = 0, t_attend = 0, n_done = 0;
 
     const int32_t n_layer = (int32_t) layers.size();
@@ -798,7 +816,13 @@ void llama_kv_stream::splitter_main() {
                 return;
             }
             const int64_t t1 = ggml_time_us();
-            split_layer(ikv, job.n_rows, job.n_tok);
+            if (noop) {
+                // the CPU's part as if it took no time: empty (LSE -inf), so the merge keeps the GPU's part only
+                float * lse = split_lse + (size_t) ikv*decode_max_tokens*split_n_head;
+                std::fill(lse, lse + (size_t) job.n_tok*split_n_head, -INFINITY);
+            } else {
+                split_layer(ikv, job.n_rows, job.n_tok);
+            }
             __atomic_store_n(split_flags + n_layer + ikv, job.tag, __ATOMIC_RELEASE);
             // the wait for layer 0 includes the time between ubatches
             t_wait   += ikv > 0 ? t1 - t0 : 0;

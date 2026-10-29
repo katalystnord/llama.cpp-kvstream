@@ -10,6 +10,7 @@
 #include <deque>
 #include <mutex>
 #include <thread>
+#include <utility>
 #include <vector>
 
 // KV streaming [EXPERIMENTAL]
@@ -287,7 +288,7 @@ private:
     float                              split_frac    = 0.0f; // LLAMA_KV_SPLIT: the share in use
     int                                split_threads = 8;    // LLAMA_KV_SPLIT_THREADS
 
-    // LLAMA_KV_SPLIT=auto: hill climbing on the time between decode ubatches, in windows of split_window ubatches
+    // LLAMA_KV_SPLIT=auto: hill climbing on the time per token written, in windows of split_window decode ubatches
     struct split_tuner {
         bool                 on       = false;
         int                  phase    = 0;     // 0: measure the base share, 1: measure a probe, 2: settled
@@ -295,17 +296,18 @@ private:
         float                probe    = 0.0f;
         float                dir      = 1.0f;
         bool                 turned   = false; // the other direction was tried
-        double               t_base   = 0.0;   // us per ubatch at the base share
+        double               t_base   = 0.0;   // us per token at the base share
         int                  skip     = 0;     // ubatches not counted after a change (graph rebuild)
         uint32_t             settled  = 0;     // ubatches since settling
         uint32_t             n_out    = 0;     // streamed pages when settled
-        std::vector<int64_t> samples;
+        std::vector<std::pair<int64_t, uint32_t>> samples; // (us, tokens) of a ubatch
         int64_t              t_last   = 0;     // time of the last decode prepare
         uint64_t             n_last   = 0;     // its n_prepared
+        uint32_t             c_last   = 0;     // its first cell
     } tuner;
     static constexpr int   split_window = 16;
-    static constexpr float split_step   = 0.1f;
-    float split_tune(uint32_t n_out, bool decode);
+    static constexpr float split_step   = 0.1f; // 0.05 got stuck at 0: a small share does not cover the split's fixed cost
+    float split_tune(uint32_t n_out, bool decode, uint32_t cell0);
     int64_t                            split_n_head  = 0;    // query heads
     uint32_t                           n_split       = 0;    // pages the CPU attends in the current ubatch
     uint32_t                           split_tag     = 0;    // counts the ubatches that split
