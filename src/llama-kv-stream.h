@@ -296,6 +296,7 @@ private:
         float                probe    = 0.0f;
         float                dir      = 1.0f;
         bool                 turned   = false; // the other direction was tried
+        bool                 leaped   = false; // from no split, the step after a first step that did not pay was tried
         double               t_base   = 0.0;   // us per token at the base share
         int                  skip     = 0;     // ubatches not counted after a change (graph rebuild)
         uint32_t             settled  = 0;     // ubatches since settling

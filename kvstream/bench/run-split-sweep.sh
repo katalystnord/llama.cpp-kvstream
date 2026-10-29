@@ -17,6 +17,8 @@ export MODEL CTV=q8_0 POOL_MIB=${POOL_MIB:-2420} SPEC=${SPEC:-"--spec-type none"
 post() { curl -s -m 600 -H 'Content-Type: application/json' -d "$2" "http://127.0.0.1:8099$1"; }
 
 start() {  # name fraction threads
+  # the previous server's unit must be gone, or systemd-run refuses the name (and a stray server answers instead)
+  local w=0; while systemctl --user list-units --all -q 'kvs-sweep.scope' | grep -q kvs-sweep; do sleep 1; w=$((w+1)); [ $w -gt 60 ] && { say "$1: previous server still there"; return 1; }; done
   if [ "$2" = 0 ]; then unset LLAMA_KV_SPLIT; else export LLAMA_KV_SPLIT=$2 LLAMA_KV_SPLIT_THREADS=$3; fi
   systemd-run --user --scope -q --unit=kvs-sweep "$R/kvstream/scripts/serve-long.sh" 163840 8099 --slot-save-path "$SLOTS" \
     > "$N/server-sweep-$1.log" 2>&1 </dev/null &
@@ -25,6 +27,8 @@ start() {  # name fraction threads
     sleep 2; done
 }
 stop() { systemctl --user stop kvs-sweep.scope; sleep 3; systemctl --user kill -s KILL kvs-sweep.scope 2>/dev/null; sleep 2; }
+# a failed start leaves nothing running on the port
+trap 'systemctl --user stop kvs-sweep.scope 2>/dev/null' EXIT
 
 systemctl --user stop llama-server.service llama-proxy.service llama-long.service 2>/dev/null
 if [ ! -s "$SLOTS/$FILE" ]; then
@@ -35,7 +39,7 @@ if [ ! -s "$SLOTS/$FILE" ]; then
 fi
 for c in $CONFIGS; do
   f=${c%%:*}; t=${c##*:}; name=f$f-t$t
-  start "$name" "$f" "$t" || continue
+  start "$name" "$f" "$t" || { stop; continue; }
   say "$name: restored: $(post '/slots/0?action=restore' "{\"filename\": \"$FILE\"}" | cut -c1-160)"
   python3 -I -u "$N/longctx.py" 8099 $DEPTH "$name" | cut -c1-200
   grep 'split:' "$N/server-sweep-$name.log" | tail -2

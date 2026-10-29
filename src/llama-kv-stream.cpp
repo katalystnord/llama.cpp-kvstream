@@ -708,6 +708,7 @@ float llama_kv_stream::split_tune(uint32_t n_out, bool decode, uint32_t cell0) {
             t.samples.clear();
             t.skip = 2;
             t.turned = false;
+            t.leaped = false;
         }
         return t.base;
     }
@@ -770,6 +771,13 @@ float llama_kv_stream::split_tune(uint32_t n_out, bool decode, uint32_t cell0) {
         t.t_base = mean;
         t.turned = true; // having improved, do not turn back
         return try_probe() ? t.probe : settle();
+    }
+    // the first step from no split may not cover the split's fixed cost while larger shares pay (found on the second
+    // machine: 0.1 under 2%, 0.2 to 0.5 about 4% each): from 0, try one step further once before settling
+    if (t.base == 0.0f && t.dir > 0.0f && !t.leaped && t.probe < 2*split_step - 1e-3f) {
+        t.leaped = true;
+        t.probe  = 2*split_step;
+        return t.probe;
     }
     if (!t.turned) {
         t.turned = true;
