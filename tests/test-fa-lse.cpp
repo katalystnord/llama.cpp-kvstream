@@ -6,13 +6,19 @@
 // per-head and the split-KV paths, several rows, which take the tiled and the chunked paths, 1 and 12 threads):
 //   1. attention over K/V[0, n1) and K/V[n1, n), merged by their LSE, equals attention over K/V[0, n): output and LSE;
 //   2. the LSE equals log(sum(exp(scale * q.k + mask))) computed in double precision from the same (f16) inputs;
-//   3. a row whose part is fully masked gets -inf and weight 0 in the merge.
+//   3. a row whose part is fully masked gets -inf and weight 0 in the merge;
+//   4. on a GPU backend, if there is one and it takes the case: the GPU's output and LSE match the CPU's, and its parts
+//      merge to its full result, and its first part merged with the CPU's second part (the split) equals the CPU's
+//      full result (on an RDNA4 card the q8_0 decode cases run the paged decode kernel). Cases whose GPU
+//      kernel does not write the LSE (the vec and tile kernels) are reported and skipped.
 // With an f16 V cache the kernel accumulates the output in f16 (VKQ16), so the full run and the merged parts round
 // differently by about 1e-3; there the merge must add no error beyond the kernel's own: both are compared with a
 // double-precision output, and the merged error may be at most twice the full run's.
 
 #include "ggml.h"
 #include "ggml-cpu.h"
+#include "ggml-backend.h"
+#include "ggml-alloc.h"
 #include "../ggml/src/ggml-impl.h"
 
 #include <cmath>
@@ -41,10 +47,13 @@ struct fa_case {
     int          n_threads;
 };
 
+static ggml_backend_t g_gpu = nullptr;
+
 // Runs attention of q over K/V rows [c0, c1) with the matching mask columns; returns output [n_rows][n_head][D] and
 // LSE [n_rows][n_head].
 static void run_fa(const fa_case & c, const std::vector<float> & q, const std::vector<float> & k, const std::vector<float> & v,
-        const std::vector<float> & mask, int64_t c0, int64_t c1, float scale, std::vector<float> & out, std::vector<float> & lse) {
+        const std::vector<float> & mask, int64_t c0, int64_t c1, float scale, std::vector<float> & out, std::vector<float> & lse,
+        ggml_backend_t gpu = nullptr) {
     const int64_t n_head = c.n_head_kv*c.gqa;
     const int64_t n      = c1 - c0;
 
@@ -78,8 +87,42 @@ static void run_fa(const fa_case & c, const std::vector<float> & q, const std::v
     }
     ggml_fp32_to_fp16_row(mp.data(), (ggml_fp16_t *) tm->data, (int64_t) mp.size());
 
-    ggml_tensor * fa = ggml_flash_attn_ext(ctx, tq, tk, tv, tm, scale, 0.0f, 0.0f);
     lse.assign(c.n_rows*n_head, NAN);
+    if (gpu) {
+        // the same inputs in the GPU's memory, and the LSE in a GPU tensor (the CUDA/HIP kernels take a device pointer)
+        ggml_init_params gp = { 16*ggml_tensor_overhead() + ggml_graph_overhead(), nullptr, true };
+        ggml_context * gctx = ggml_init(gp);
+        ggml_tensor * src[4] = { tq, tk, tv, tm };
+        ggml_tensor * dev[4];
+        for (int i = 0; i < 4; ++i) {
+            dev[i] = ggml_dup_tensor(gctx, src[i]);
+        }
+        ggml_tensor * tl = ggml_new_tensor_1d(gctx, GGML_TYPE_F32, c.n_rows*n_head);
+        ggml_tensor * fa = ggml_flash_attn_ext(gctx, dev[0], dev[1], dev[2], dev[3], scale, 0.0f, 0.0f);
+        ggml_backend_buffer_t buf = ggml_backend_alloc_ctx_tensors(gctx, gpu);
+        for (int i = 0; i < 4; ++i) {
+            ggml_backend_tensor_set(dev[i], src[i]->data, 0, ggml_nbytes(src[i]));
+        }
+        // NaN until written: the vec and tile kernels take the parameter but do not write it
+        ggml_backend_tensor_set(tl, lse.data(), 0, lse.size()*sizeof(float));
+        void * p = tl->data;
+        memcpy(fa->op_params + GGML_FA_PARAM_LSE, &p, sizeof(p));
+        ggml_cgraph * gf = ggml_new_graph(gctx);
+        ggml_build_forward_expand(gf, fa);
+        if (!ggml_backend_supports_op(gpu, fa) || ggml_backend_graph_compute(gpu, gf) != GGML_STATUS_SUCCESS) {
+            out.clear();
+        } else {
+            out.resize(c.D*n_head*c.n_rows);
+            ggml_backend_tensor_get(fa, out.data(), 0, out.size()*sizeof(float));
+            ggml_backend_tensor_get(tl, lse.data(), 0, lse.size()*sizeof(float));
+        }
+        ggml_backend_buffer_free(buf);
+        ggml_free(gctx);
+        ggml_free(ctx);
+        return;
+    }
+
+    ggml_tensor * fa = ggml_flash_attn_ext(ctx, tq, tk, tv, tm, scale, 0.0f, 0.0f);
     float * p = lse.data();
     memcpy(fa->op_params + GGML_FA_PARAM_LSE, &p, sizeof(p));
 
@@ -225,6 +268,63 @@ static int check(const fa_case & c) {
             }
         }
     }
+    // 4. the GPU against the CPU, and its own parts merged
+    if (g_gpu) {
+        std::vector<float> og, lg, og1, lg1, og2, lg2;
+        run_fa(c, q, k, v, mask, 0, c.n_kv, scale, og, lg, g_gpu);
+        if (og.empty()) {
+            printf("%-28s gpu: does not take this case, skipped\n", c.name);
+        } else if (std::isnan(lg[0])) {
+            printf("%-28s gpu: its kernel for this case does not write the LSE (vec/tile), skipped\n", c.name);
+        } else {
+            run_fa(c, q, k, v, mask, 0, c.n1, scale, og1, lg1, g_gpu);
+            run_fa(c, q, k, v, mask, c.n1, c.n_kv, scale, og2, lg2, g_gpu);
+            double d_out = 0.0, d_lse = 0.0, d_merge = 0.0, d_cross = 0.0;
+            int gbad = 0;
+            for (int64_t il = 0; il < c.n_rows*n_head; ++il) {
+                const bool lse_ok = (std::isinf(l_all[il]) && lg[il] == l_all[il]) ||
+                                    (!std::isinf(l_all[il]) && std::fabs(lg[il] - l_all[il]) <= 1e-2);
+                if (!lse_ok && gbad++ < 5) {
+                    fprintf(stderr, "  %s gpu: row/head %lld: lse %g, cpu %g\n", c.name, (long long) il, lg[il], l_all[il]);
+                }
+                if (!std::isinf(l_all[il])) {
+                    d_lse = std::fmax(d_lse, std::fabs(lg[il] - l_all[il]));
+                }
+                const double a = og1.empty() ? NAN : lg1[il], b = og2.empty() ? NAN : lg2[il];
+                const double m = std::fmax(a, b);
+                const double wa = std::isinf(a) ? 0.0 : std::exp(a - m), wb = std::isinf(b) ? 0.0 : std::exp(b - m);
+                // the split itself: the GPU's first part merged with the CPU's second part, against the CPU's full result
+                const double xb = l2[il], xm = std::fmax(a, xb);
+                const double xa_w = std::isinf(a) ? 0.0 : std::exp(a - xm), xb_w = std::isinf(xb) ? 0.0 : std::exp(xb - xm);
+                for (int64_t d = 0; d < c.D; ++d) {
+                    const int64_t io = il*c.D + d;
+                    d_out = std::fmax(d_out, std::fabs(og[io] - o_all[io]));
+                    if (!og1.empty()) {
+                        d_cross = std::fmax(d_cross, std::fabs((xa_w*og1[io] + xb_w*o2[io])/(xa_w + xb_w) - o_all[io]));
+                    }
+                    if (!og1.empty() && !og2.empty()) {
+                        d_merge = std::fmax(d_merge, std::fabs((wa*og1[io] + wb*og2[io])/(wa + wb) - og[io]));
+                    }
+                }
+            }
+            if (d_out > 1e-2) {
+                fprintf(stderr, "  %s gpu: output differs from the cpu by %g\n", c.name, d_out);
+                gbad++;
+            }
+            if (!(d_cross <= 1e-2)) {
+                fprintf(stderr, "  %s gpu: gpu part 1 + cpu part 2 against the cpu's full result: %g\n", c.name, d_cross);
+                gbad++;
+            }
+            if (og1.empty() || og2.empty() || !(d_merge <= 5e-3)) {
+                fprintf(stderr, "  %s gpu: parts %s, merged against full %g\n", c.name,
+                        og1.empty() || og2.empty() ? "not taken" : "taken", d_merge);
+                gbad++;
+            }
+            printf("%-28s gpu: %s  (|out - cpu| %.2e, |lse - cpu| %.2e, |merged - full| %.2e, gpu+cpu split %.2e)\n",
+                    c.name, gbad ? "FAIL" : "ok", d_out, d_lse, d_merge, d_cross);
+            bad += gbad;
+        }
+    }
     if (max_e_merged > 2.0*max_e_full + 1e-5) {
         fprintf(stderr, "  %s: merged output error %g against double precision, full run %g\n", c.name, max_e_merged, max_e_full);
         bad++;
@@ -239,6 +339,9 @@ static int check(const fa_case & c) {
 }
 
 int main(void) {
+    ggml_backend_load_all();
+    g_gpu = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_GPU, nullptr);
+    printf("GPU backend: %s\n", g_gpu ? ggml_backend_name(g_gpu) : "none (CPU checks only)");
     const fa_case cases[] = {
         // name                          type            D   kvh gqa rows  n_kv    n1  masked thr
         { "q8_0 decode, 12 threads",     GGML_TYPE_Q8_0, 256, 4, 6,  1,    3000,  1234, false, 12 },
@@ -256,5 +359,8 @@ int main(void) {
         bad += check(c) ? 1 : 0;
     }
     printf("%s\n", bad ? "FAILED" : "all passed");
+    if (g_gpu) {
+        ggml_backend_free(g_gpu);
+    }
     return bad ? 1 : 0;
 }

@@ -853,7 +853,10 @@ void ggml_cuda_flash_attn_ext(ggml_backend_cuda_context & ctx, ggml_tensor * dst
 }
 
 bool ggml_cuda_flash_attn_ext_writes_lse(int device, const ggml_tensor * dst) {
-    return ggml_cuda_get_best_fattn_kernel(device, dst) == BEST_FATTN_KERNEL_MMA_F16;
+    // the paged decode kernel writes it in its combine step (it runs whenever it takes the shape, see
+    // ggml_cuda_flash_attn_ext)
+    return ggml_cuda_fattn_paged_decode_enabled(device, dst) ||
+        ggml_cuda_get_best_fattn_kernel(device, dst) == BEST_FATTN_KERNEL_MMA_F16;
 }
 
 bool ggml_cuda_flash_attn_ext_supported(int device, const ggml_tensor * dst) {

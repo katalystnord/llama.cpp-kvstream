@@ -288,8 +288,10 @@ void ggml_cuda_flash_attn_ext_paged_decode(ggml_backend_cuda_context & ctx, ggml
 #undef PD_LAUNCH
 #undef PD_ARGS
     CUDA_CHECK(cudaGetLastError());
+    float * lse = nullptr;
+    memcpy(&lse, dst->op_params + GGML_FA_PARAM_LSE, sizeof(lse));
     pd_combine<<<dim3(nb * PD_GQA, n_heads), PD_D, 0, stream>>>(O_part, ML_part, n_splits, n_tiles * R,
-        (char *) dst->data, dst->nb[1], dst->nb[2], sync);
+        (char *) dst->data, dst->nb[1], dst->nb[2], sync, lse);
     CUDA_CHECK(cudaGetLastError());
 }
 

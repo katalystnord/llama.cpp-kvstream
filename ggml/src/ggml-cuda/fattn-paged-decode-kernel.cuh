@@ -448,10 +448,12 @@ static __global__ void pd_partial(
 #endif // PD_RDNA4
 }
 
-// One block per (row, KV head), one thread per output dim.
+// One block per (row, KV head), one thread per output dim. With lse, also the row's log-sum-exp (max + log(rowsum),
+// -inf for a fully masked row) at lse[token*n_q_heads + q_head], as the other FA kernels write it.
 static __global__ void pd_combine(
         const float * __restrict__ O_part, const float2 * __restrict__ ML_part, const int n_splits, const int R,
-        char * __restrict__ dst, const int64_t dst_nb1, const int64_t dst_nb2, const pd_sync sync) {
+        char * __restrict__ dst, const int64_t dst_nb1, const int64_t dst_nb2, const pd_sync sync,
+        float * __restrict__ lse) {
     // Every partial block has finished (stream order), so the data they read is free again.
     if (sync.consumed && blockIdx.x == 0 && blockIdx.y == 0 && threadIdx.x == 0) {
         sync.release();
@@ -473,4 +475,7 @@ static __global__ void pd_combine(
     }
     float * out = (float *) (dst + (r / PD_GQA) * dst_nb2 + (head * PD_GQA + r % PD_GQA) * dst_nb1);
     out[threadIdx.x] = den == 0.0f ? 0.0f : num / den; // a fully masked row is 0, as in the CPU reference and pd_merge
+    if (lse && threadIdx.x == 0) {
+        lse[(r / PD_GQA) * (n_heads * PD_GQA) + head * PD_GQA + r % PD_GQA] = den == 0.0f ? -INFINITY : M + logf(den);
+    }
 }
