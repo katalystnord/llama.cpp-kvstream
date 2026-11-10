@@ -1463,7 +1463,9 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
     // Hidden rows from the most recent target verification batch, grouped by seq.
     // Row 0 corresponds to the sampled token, row N to the Nth accepted draft token.
     // Only the first n_verify_h_max rows are kept (a verify has 1 + n_draft rows); the last row is pending_h.
-    static constexpr int32_t n_verify_h_max = 64;
+    // n_draft is the longest draft of ANY type in the chain, not only MTP's own n_max: with draft-mtp,ngram-mod a
+    // verify can carry 1 + 64 ngram rows, and a fixed 64 here crashed accept() when all 64 were accepted.
+    int32_t n_verify_h_max = 64;
     std::vector<std::vector<float>> verify_h;
     std::vector<int32_t> verify_h_rows;
 
@@ -1551,6 +1553,7 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
             }
         }
         this->n_max = this->params.n_max;
+        n_verify_h_max = std::max<int32_t>(this->n_max, common_speculative_n_max(&params)) + 1;
 
         pending_h.assign(n_seq, std::vector<float>(n_embd, 0.0f));
 
