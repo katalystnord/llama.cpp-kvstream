@@ -122,7 +122,9 @@ common_chat_params common_chat_params_init_gpt_oss(const common_chat_template & 
 
                 // recipient as the channel name (seen from gpt-oss-20b in long agent runs)
                 //   <|channel|>functions.NAME<|channel|>(commentary|analysis)[constraint]<|message|>ARGS
+                // also with a stray "<|channel|>commentary to=assistant" before the real channel
                 auto tool_as_channel = p.tool(p.tool_open(p.literal("<|channel|>functions.") + p.tool_name(p.literal(name)) +
+                                                          p.optional(p.literal("<|channel|>commentary to=assistant")) +
                                                           channel + constraint + p.literal("<|message|>")) + args);
 
                 tool_choice |= p.rule("tool-" + std::to_string(tool_index), tool_in_role | tool_in_channel | tool_as_channel);

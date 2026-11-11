@@ -6776,6 +6776,13 @@ static void test_template_output_peg_parsers(bool detailed_debug) {
             .expect(message_assist_call_thoughts)
             .run();
 
+        // Same, with a stray "<|channel|>commentary to=assistant" and a "code" constraint (gpt-oss-20b under Codex CLI)
+        tst.test("<|channel|>functions.special_function<|channel|>commentary to=assistant<|channel|>commentary code<|message|>{\"arg1\": 1}")
+            .reasoning_format(COMMON_REASONING_FORMAT_AUTO)
+            .tools({ special_function_tool })
+            .expect(message_assist_call)
+            .run();
+
         // Tool call in commentary channel (channel header variant)
         tst.test("<|channel|>commentary to=functions.special_function<|message|>{\"arg1\": 1}")
             .reasoning_format(COMMON_REASONING_FORMAT_AUTO)
