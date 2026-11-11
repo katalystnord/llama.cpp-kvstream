@@ -78,5 +78,9 @@ In order:
    rescored on the agent tasks.
 4. **Smaller community 2-bit files** (ask David before downloading): AtomicChat AD-IQ2_XS, lmstudio-community
    IQ2_XXS. Smaller means more of the model on the card. Sizes and quality not checked.
-5. **A Saluki-style build** (large: BF16 download well over 100 GB, days of work): mixed precision per layer with an
-   importance matrix from our own agent sessions, tuned to keep tool calling. Only if 1 to 4 leave Bolt worth it.
+5. **Long context without streaming** (short, do alongside 1): only 8 of Bolt's 88 layers have attention (2 KV heads,
+   head size 128), so its KV cache is about 4 KB per token at q8, about 1 GB at 256K, from the header. It cannot
+   use the KV stream (wrong shape) and does not need it. Fit check at 128K and 256K in the router preset; if it fits,
+   Bolt is our only model with a native very long window (256K, vision).
+6. **A Saluki-style build** (large: BF16 download well over 100 GB, days of work): mixed precision per layer with an
+   importance matrix from our own agent sessions, tuned to keep tool calling. Only if 1 to 5 leave Bolt worth it.
