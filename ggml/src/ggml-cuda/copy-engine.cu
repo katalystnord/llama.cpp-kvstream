@@ -1,5 +1,6 @@
 #include "copy-engine.cuh"
 
+#include "ggml-backend-impl.h"
 #include "ggml-copy-engine.h"
 
 #include <cstdlib>
@@ -185,6 +186,41 @@ static void * ggml_cuda_copy_engine_alloc_shared(ggml_backend_copy_engine_t ce, 
     return p;
 }
 
+template <typename T>
+static __global__ void k_copy_to_host(const T * __restrict__ src, T * __restrict__ dst, const size_t n) {
+    for (size_t i = (size_t) blockIdx.x*blockDim.x + threadIdx.x; i < n; i += (size_t) gridDim.x*blockDim.x) {
+        dst[i] = src[i];
+    }
+}
+
+// On AMD, HIP can put a device -> host copy that waits for earlier kernels on the SDMA queue of the copy engine, and the
+// kernels it waits for can wait for copies behind it in that queue. A kernel on the compute stream uses no SDMA queue.
+static bool ggml_cuda_copy_engine_copy_to_host(ggml_backend_t backend, void * dst, const void * src, size_t size) {
+    if (!ggml_backend_is_cuda(backend)) {
+        return false;
+    }
+    auto * ctx = (ggml_backend_cuda_context *) backend->context;
+    ggml_cuda_set_device(ctx->device);
+
+    void * dst_dev = nullptr;
+    if (cudaHostGetDevicePointer(&dst_dev, dst, 0) != cudaSuccess) {
+        (void) cudaGetLastError(); // dst is not pinned
+        return false;
+    }
+
+    const int    block    = 256;
+    const size_t max_grid = 1024;
+    cudaStream_t stream   = ctx->stream();
+    if ((((uintptr_t) src | (uintptr_t) dst_dev | size) % sizeof(int4)) == 0) {
+        const size_t n = size/sizeof(int4);
+        k_copy_to_host<<<std::min((n + block - 1)/block, max_grid), block, 0, stream>>>((const int4 *) src, (int4 *) dst_dev, n);
+    } else {
+        k_copy_to_host<<<std::min((size + block - 1)/block, max_grid), block, 0, stream>>>((const char *) src, (char *) dst_dev, size);
+    }
+    CUDA_CHECK(cudaGetLastError());
+    return true;
+}
+
 static const ggml_backend_copy_engine_i ggml_cuda_copy_engine_iface = {
     /* .init           = */ ggml_cuda_copy_engine_init,
     /* .free           = */ ggml_cuda_copy_engine_free,
@@ -192,6 +228,7 @@ static const ggml_backend_copy_engine_i ggml_cuda_copy_engine_iface = {
     /* .copy_to_device = */ ggml_cuda_copy_engine_copy_to_device,
     /* .record         = */ ggml_cuda_copy_engine_record,
     /* .done           = */ ggml_cuda_copy_engine_done,
+    /* .copy_to_host   = */ ggml_cuda_copy_engine_copy_to_host,
 };
 
 const ggml_backend_copy_engine_i * ggml_cuda_copy_engine_get_iface(void) {

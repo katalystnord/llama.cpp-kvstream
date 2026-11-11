@@ -319,7 +319,11 @@ void llama_kv_stream::evict(uint32_t page) {
         for (size_t ikv = 0; ikv < layers.size(); ++ikv) {
             for (bool is_v : { false, true }) {
                 const size_t bytes = page_size*row_size(ikv, is_v);
-                ggml_backend_tensor_get_async(backend, is_v ? layers[ikv].v : layers[ikv].k, host(ikv, is_v, page), slot*bytes, bytes);
+                const ggml_tensor * t = is_v ? layers[ikv].v : layers[ikv].k;
+                // with the copy engine, a DMA write-back can deadlock with its copies (kvstream/design/copy-stall.md)
+                if (!ce || !ce_iface->copy_to_host(backend, host(ikv, is_v, page), (const char *) t->data + slot*bytes, bytes)) {
+                    ggml_backend_tensor_get_async(backend, t, host(ikv, is_v, page), slot*bytes, bytes);
+                }
             }
         }
         saved[page] = 1;

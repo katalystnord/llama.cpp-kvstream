@@ -110,7 +110,14 @@ polls. Options:
    ubatch's layer copies, so nothing the dependency needs can sit behind it. Simplest, but it must cover every HIP
    copy (write-backs, read-backs), and it costs host/GPU overlap.
 
-To discuss with achyudh before choosing; then verify with `repro-stall.sh` (7 of 11 deep reads stalled, so a fix needs
+Chosen 2026-11-11 (no answer from achyudh after 12 days): option 1, narrowed to what the logs show. Branch
+`copy-stall-kernel-writeback`: `llama_kv_stream::evict()` writes pages back with a copy kernel on the compute stream
+(`copy_to_host` in the copy engine interface), falling back to `ggml_backend_tensor_get_async` only when the host
+store is not pinned. Page loads (`assign`, host to device) stay as they are: their fallback queue is BlitHostToDev, not
+the copy engine's. Not covered, no stall seen from them: the logits read-back at the end of a prompt and the MTP rows
+read every ubatch (`llama-context.cpp`), which are also device-to-host copies with dependencies. Test: not yet run.
+
+Before the fix it was to be discussed with achyudh; then verify with `repro-stall.sh` (7 of 11 deep reads stalled, so a fix needs
 several clean runs to count).
 
 ## Report to achyudh

@@ -28,6 +28,10 @@ struct ggml_backend_copy_engine_i {
     // event i marks the current end of the queue; done(i) is true once the queue has passed it
     void (*record)(ggml_backend_copy_engine_t ce, int i);
     bool (*done)(ggml_backend_copy_engine_t ce, int i);
+
+    // queue a device -> host copy as a kernel on the backend's compute stream, so no DMA queue holds it (see
+    // kvstream/design/copy-stall.md); dst must be pinned; false if not possible (then use ggml_backend_tensor_get_async)
+    bool (*copy_to_host)(ggml_backend_t backend, void * dst, const void * src, size_t size);
 };
 
 typedef const struct ggml_backend_copy_engine_i * (*ggml_backend_copy_engine_get_iface_t)(void);
