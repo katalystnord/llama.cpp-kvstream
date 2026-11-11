@@ -6760,6 +6760,22 @@ static void test_template_output_peg_parsers(bool detailed_debug) {
             .expect(message_assist_call)
             .run();
 
+        // Tool call with the recipient as the channel name, as gpt-oss-20b sometimes emits it:
+        //   "<|channel|>functions.NAME<|channel|>commentary json<|message|>JSON"
+        tst.test("<|channel|>functions.special_function<|channel|>commentary json<|message|>{\"arg1\": 1}")
+            .reasoning_format(COMMON_REASONING_FORMAT_AUTO)
+            .tools({ special_function_tool })
+            .expect(message_assist_call)
+            .run();
+
+        tst.test(
+               "<|channel|>analysis<|message|>I'm\nthinking<|end|>"
+               "<|start|>assistant<|channel|>functions.special_function<|channel|>commentary <|constrain|>json<|message|>{\"arg1\": 1}")
+            .reasoning_format(COMMON_REASONING_FORMAT_AUTO)
+            .tools({ special_function_tool })
+            .expect(message_assist_call_thoughts)
+            .run();
+
         // Tool call in commentary channel (channel header variant)
         tst.test("<|channel|>commentary to=functions.special_function<|message|>{\"arg1\": 1}")
             .reasoning_format(COMMON_REASONING_FORMAT_AUTO)
