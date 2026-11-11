@@ -2092,6 +2092,51 @@ static void test_convert_responses_to_chatcmpl() {
 
         assert_equals(input.at("extra_params").at("response_format").dump(), result_extra.at("response_format").dump());
     }
+
+    // Namespace tools (Codex sends each MCP server as one): functions become <namespace>__<name>, earlier calls
+    // keep that flat name, and function_call items in the response get name and namespace back
+    {
+        json input = json::parse(R"({
+            "input": [
+                {"type": "message", "role": "user", "content": "search"},
+                {"type": "function_call", "call_id": "c1", "namespace": "mcp__searxng", "name": "web_search", "arguments": "{\"query\":\"x\"}"},
+                {"type": "function_call_output", "call_id": "c1", "output": "results"}
+            ],
+            "tools": [
+                {"type": "function", "name": "shell", "parameters": {"type": "object"}},
+                {"type": "namespace", "name": "mcp__searxng", "description": "Tools in the mcp__searxng namespace.", "tools": [
+                    {"type": "function", "name": "web_search", "parameters": {"type": "object"}},
+                    {"type": "custom", "name": "freeform"}
+                ]},
+                {"type": "web_search"}
+            ]
+        })");
+
+        json result = server_chat_convert_responses_to_chatcmpl(input);
+
+        assert_equals((size_t)2, result.at("tools").size());
+        assert_equals(std::string("shell"), result.at("tools")[0].at("function").at("name").get<std::string>());
+        assert_equals(std::string("mcp__searxng__web_search"), result.at("tools")[1].at("function").at("name").get<std::string>());
+        assert_equals(std::string("mcp__searxng__web_search"), result.at("messages")[1].at("tool_calls")[0].at("function").at("name").get<std::string>());
+
+        auto ns = server_chat_responses_tool_namespaces(input);
+        assert_equals((size_t)1, ns.size());
+
+        json response = json::parse(R"({"output": [
+            {"type": "function_call", "name": "mcp__searxng__web_search", "call_id": "c2", "arguments": "{}"},
+            {"type": "function_call", "name": "shell", "call_id": "c3", "arguments": "{}"}
+        ]})");
+        server_chat_restore_tool_namespaces(response, ns);
+        assert_equals(std::string("web_search"), response.at("output")[0].at("name").get<std::string>());
+        assert_equals(std::string("mcp__searxng"), response.at("output")[0].at("namespace").get<std::string>());
+        assert_equals(std::string("shell"), response.at("output")[1].at("name").get<std::string>());
+        assert_equals(false, response.at("output")[1].contains("namespace"));
+
+        json event = json::parse(R"({"event": "response.output_item.added", "data": {"type": "response.output_item.added",
+            "item": {"type": "function_call", "name": "mcp__searxng__web_search", "call_id": "c2", "arguments": ""}}})");
+        server_chat_restore_tool_namespaces(event, ns);
+        assert_equals(std::string("mcp__searxng"), event.at("data").at("item").at("namespace").get<std::string>());
+    }
 }
 
 // Shared LFM2 parser cases - all variants use one output format and parser
@@ -7171,6 +7216,15 @@ static void test_template_output_peg_parsers(bool detailed_debug) {
             .reasoning_format(COMMON_REASONING_FORMAT_AUTO)
             .tools({ special_function_tool })
             .expect(message_assist_call)
+            .run();
+
+        // Same with "assistant" as a stray channel name before the channel header (gpt-oss-20b in a Pi run, 2026-11-11)
+        tst.test(
+               "<|channel|>analysis<|message|>I'm\nthinking<|end|>"
+               "<|start|>assistant<|channel|>assistant<|channel|>commentary to=functions.special_function<|constrain|>json<|message|>{\"arg1\": 1}")
+            .reasoning_format(COMMON_REASONING_FORMAT_AUTO)
+            .tools({ special_function_tool })
+            .expect(message_assist_call_thoughts)
             .run();
 
         // Tool call in commentary channel (channel header variant)

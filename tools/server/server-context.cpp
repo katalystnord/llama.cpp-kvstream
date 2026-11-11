@@ -5334,7 +5334,8 @@ std::unique_ptr<server_res_generator> server_routes::handle_completions_impl(
             const json & data,
             const std::vector<raw_buffer> & files,
             task_response_type res_type,
-            const common_chat_session & chat_session) {
+            const common_chat_session & chat_session,
+            const server_chat_tool_namespaces & tool_namespaces) {
     GGML_ASSERT(type == SERVER_TASK_TYPE_COMPLETION || type == SERVER_TASK_TYPE_INFILL);
 
     auto res = create_response();
@@ -5439,6 +5440,7 @@ std::unique_ptr<server_res_generator> server_routes::handle_completions_impl(
             GGML_ASSERT(!arr.empty() && "empty results");
             if (arr.size() == 1) {
                 // if single request, return single object instead of array
+                server_chat_restore_tool_namespaces(arr[0], tool_namespaces);
                 res->ok(arr[0]);
             } else if (res_type == TASK_RESPONSE_TYPE_OAI_CHAT || res_type == TASK_RESPONSE_TYPE_OAI_CMPL) {
                 // if multiple results in OAI format, we need to re-format them
@@ -5490,13 +5492,14 @@ std::unique_ptr<server_res_generator> server_routes::handle_completions_impl(
         } else if (res_type == TASK_RESPONSE_TYPE_ANTHROPIC) {
             res->data = format_anthropic_sse(first_result_json);
         } else if (res_type == TASK_RESPONSE_TYPE_OAI_RESP) {
+            server_chat_restore_tool_namespaces(first_result_json, tool_namespaces);
             res->data = format_oai_resp_sse(first_result_json);
         } else {
             res->data = format_oai_sse(first_result_json);
         }
         res->status = 200;
         res->content_type = "text/event-stream";
-        res->set_next([res_this = res.get(), res_type, sse_ping_interval](std::string & output) -> bool {
+        res->set_next([res_this = res.get(), res_type, sse_ping_interval, tool_namespaces](std::string & output) -> bool {
             static auto format_error = [](task_response_type res_type, const json & res_json) {
                 if (res_type == TASK_RESPONSE_TYPE_ANTHROPIC) {
                     return format_anthropic_sse({
@@ -5585,6 +5588,7 @@ std::unique_ptr<server_res_generator> server_routes::handle_completions_impl(
                     if (res_type == TASK_RESPONSE_TYPE_ANTHROPIC) {
                         output = format_anthropic_sse(res_json);
                     } else if (res_type == TASK_RESPONSE_TYPE_OAI_RESP) {
+                        server_chat_restore_tool_namespaces(res_json, tool_namespaces);
                         output = format_oai_resp_sse(res_json);
                     } else {
                         output = format_oai_sse(res_json);
@@ -6107,7 +6111,8 @@ void server_routes::init_routes() {
     this->post_responses_oai = [this](const server_http_req & req) {
         auto res = create_response();
         std::vector<raw_buffer> files;
-        json body = server_chat_convert_responses_to_chatcmpl(json::parse(req.body));
+        const json req_body = json::parse(req.body);
+        json body = server_chat_convert_responses_to_chatcmpl(req_body);
         SRV_DBG("%s\n", "Request converted: OpenAI Responses -> OpenAI Chat Completions");
         SRV_DBG("converted request: %s\n", body.dump().c_str());
         common_chat_session session;
@@ -6123,7 +6128,8 @@ void server_routes::init_routes() {
             body_parsed,
             files,
             TASK_RESPONSE_TYPE_OAI_RESP,
-            session);
+            session,
+            server_chat_responses_tool_namespaces(req_body));
     };
 
     this->post_responses_tok_oai = [this](const server_http_req & req) {

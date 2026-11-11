@@ -3,6 +3,7 @@
 #include "server-http.h"
 #include "server-task.h"
 #include "server-queue.h"
+#include "server-chat.h"
 
 #include "json.h"
 
@@ -149,7 +150,8 @@ private:
             const json & data,
             const std::vector<raw_buffer> & files,
             task_response_type res_type,
-            const common_chat_session & chat_session = {});
+            const common_chat_session & chat_session = {},
+            const server_chat_tool_namespaces & tool_namespaces = {});
     std::unique_ptr<server_res_generator> handle_slots_save(const server_http_req & req, int id_slot);
     std::unique_ptr<server_res_generator> handle_slots_restore(const server_http_req & req, int id_slot);
     std::unique_ptr<server_res_generator> handle_slots_erase(const server_http_req &, int id_slot);

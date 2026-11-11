@@ -126,7 +126,11 @@ common_chat_params common_chat_params_init_gpt_oss(const common_chat_template & 
                                                           p.optional(p.literal("<|channel|>commentary to=assistant")) +
                                                           channel + constraint + p.literal("<|message|>")) + args);
 
-                tool_choice |= p.rule("tool-" + std::to_string(tool_index), tool_in_role | tool_in_channel | tool_as_channel);
+                // "assistant" as a stray channel name before the channel header (seen from gpt-oss-20b in long agent runs)
+                //   <|channel|>assistant<|channel|>(commentary|analysis) to=functions.NAME[constraint]<|message|>ARGS
+                auto tool_after_assistant_channel = p.tool(p.tool_open(p.literal("<|channel|>assistant") + channel + func_name + constraint + p.literal("<|message|>")) + args);
+
+                tool_choice |= p.rule("tool-" + std::to_string(tool_index), tool_in_role | tool_in_channel | tool_as_channel | tool_after_assistant_channel);
             });
 
             auto tool_call  = p.trigger_rule("tool-call", tool_choice);
@@ -153,7 +157,9 @@ common_chat_params common_chat_params_init_gpt_oss(const common_chat_template & 
             { COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN, "<\\|start\\|>assistant(\\s+to)" },
             { COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN, "<\\|start\\|>assistant(<\\|channel\\|>(?:commentary|analysis)\\s+to)" },
             { COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN, "^<\\|channel\\|>functions\\." },
-            { COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN, "<\\|start\\|>assistant(<\\|channel\\|>functions\\.)" }
+            { COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN, "<\\|start\\|>assistant(<\\|channel\\|>functions\\.)" },
+            { COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN, "^<\\|channel\\|>assistant<\\|channel\\|>(?:commentary|analysis)\\s+to=functions" },
+            { COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN, "<\\|start\\|>assistant(<\\|channel\\|>assistant<\\|channel\\|>(?:commentary|analysis)\\s+to)" }
         };
     }
 
