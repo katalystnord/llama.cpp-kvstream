@@ -119,7 +119,12 @@ common_chat_params common_chat_params_init_gpt_oss(const common_chat_template & 
                 //   <|channel|>(commentary|analysis) to=functions.NAME[constraint]<|message|>ARGS
                 auto tool_in_channel = p.tool(p.tool_open(channel + func_name + constraint + p.literal("<|message|>")) + args);
 
-                tool_choice |= p.rule("tool-" + std::to_string(tool_index), tool_in_role | tool_in_channel);
+                // recipient as the channel name (seen from gpt-oss-20b in long agent runs)
+                //   <|channel|>functions.NAME<|channel|>(commentary|analysis)[constraint]<|message|>ARGS
+                auto tool_as_channel = p.tool(p.tool_open(p.literal("<|channel|>functions.") + p.tool_name(p.literal(name)) +
+                                                          channel + constraint + p.literal("<|message|>")) + args);
+
+                tool_choice |= p.rule("tool-" + std::to_string(tool_index), tool_in_role | tool_in_channel | tool_as_channel);
             });
 
             auto tool_call  = p.trigger_rule("tool-call", tool_choice);
@@ -144,7 +149,9 @@ common_chat_params common_chat_params_init_gpt_oss(const common_chat_template & 
             { COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN, "^\\s+to$" },
             { COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN, "^<\\|channel\\|>(?:commentary|analysis)\\s+to=functions$" },
             { COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN, "<\\|start\\|>assistant(\\s+to)" },
-            { COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN, "<\\|start\\|>assistant(<\\|channel\\|>(?:commentary|analysis)\\s+to)" }
+            { COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN, "<\\|start\\|>assistant(<\\|channel\\|>(?:commentary|analysis)\\s+to)" },
+            { COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN, "^<\\|channel\\|>functions\\." },
+            { COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN, "<\\|start\\|>assistant(<\\|channel\\|>functions\\.)" }
         };
     }
 
