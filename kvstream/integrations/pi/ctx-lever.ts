@@ -329,15 +329,17 @@ export default function ctxLever(pi: ExtensionAPI) {
 		const { model: m } = choice;
 		writeEnv(m, choice.ctx, choice.ctv);
 		registerLong(choice.ctx);
-		ctx.ui.notify(`Starting ${m.name} long with ${Math.round(choice.ctx / 1024)}K (${choice.ctv}); about 10 s...`, "info");
-		const r = await pi.exec("systemctl", ["--user", "restart", "llama-long.service"], { timeout: 700000 } as any);
+		// On demand since 2026-11-11: llama-long.socket (8090) starts the server on the first request and it stops after
+		// 10 idle minutes. Here only stop a running one, so the next request starts it with the new settings.
+		await pi.exec("systemctl", ["--user", "stop", "llama-long.service"]);
+		const r = await pi.exec("systemctl", ["--user", "start", "llama-long.socket"]);
 		if (r.code !== 0) {
-			ctx.ui.notify("Long server failed to start: " + (r.stderr || r.stdout).slice(0, 200), "error");
+			ctx.ui.notify("Could not start llama-long.socket: " + (r.stderr || r.stdout).slice(0, 200), "error");
 			return;
 		}
 		const model = (ctx as any).modelRegistry?.find?.("beast-long", `${m.id}-long`);
 		if (model) await pi.setModel(model);
-		ctx.ui.notify(`Long context ready: ${m.name}, ${Math.round(choice.ctx / 1024)}K on port 8090; the 8080 router is paused.`, "info");
+		ctx.ui.notify(`Long context set: ${m.name}, ${Math.round(choice.ctx / 1024)}K (${choice.ctv}). It loads on the first request (about 10 s), pauses the 8080 router, and stops after 10 idle minutes.`, "info");
 	}
 
 	registerLong(readEnv().ctx); // at load, so the long models are listed everywhere (also --list-models)
@@ -358,9 +360,10 @@ export default function ctxLever(pi: ExtensionAPI) {
 	pi.on("model_select", async (event, ctx) => {
 		const provider = (event.model as any).provider;
 		if (provider === "beast-long") {
-			// Open the lever when the long server is down or serving a different model than the one picked.
+			// Open the lever when the model picked is not the one the long server is set to.
 			const id = String((event.model as any).id).replace(/-long$/, "");
-			if (ctx.hasUI && (!(await longActive()) || readEnv().id !== id)) {
+			// The server starts on demand, so a stopped server is normal: only open the lever for a different model.
+			if (ctx.hasUI && readEnv().id !== id) {
 				const choice = await lever(ctx, id);
 				if (choice) await applyChoice(choice, ctx);
 			}

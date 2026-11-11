@@ -1,0 +1,13 @@
+[Unit]
+Description=Port 8090 (Pi's long-context models): start the long-context llama.cpp server on the first connection
+# On demand since 2026-11-11: the first connection starts llama-long-proxy.service,
+# which starts llama-long.service on 127.0.0.1:8092. After 10 idle minutes the proxy exits and llama-long stops with
+# it (StopWhenUnneeded), so the card is only held while something uses it.
+
+[Socket]
+Service=llama-long-proxy.service
+ListenStream=127.0.0.1:8090
+TriggerLimitIntervalSec=0
+
+[Install]
+WantedBy=sockets.target

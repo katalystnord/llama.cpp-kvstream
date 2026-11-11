@@ -28,7 +28,7 @@ two have not been measured like for like.
 - Outcome: how much the stream gains in daily use. If it is not faster, the case rests on the larger window and on
   read once, ask later, which is still a case for coding, but should be known before the bigger work.
 
-### 2. Fix the copy stall (the blocker; size unknown)
+### 2. Fix the copy stall (DONE 2026-11-11: kernel write-back, 6 of 6 deep reads clean; design/copy-stall.md)
 - Choose one of the three options in [design/copy-stall.md](design/copy-stall.md): do the evict and assign copies
   with kernels so HIP issues no SDMA copies with dependencies for them; give the copy engine its own SDMA queue through
   libhsakmt; or order HIP's copies after the copier has queued the ubatch's layers. Ideally agreed with the copy

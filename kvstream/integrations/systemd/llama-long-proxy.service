@@ -1,0 +1,7 @@
+[Unit]
+Description=Forward port 8090 to the long-context llama.cpp server on 8092; exits after 10 idle minutes
+Requires=llama-long.service
+After=llama-long.service
+
+[Service]
+ExecStart=/usr/lib/systemd/systemd-socket-proxyd --exit-idle-time=600 127.0.0.1:8092

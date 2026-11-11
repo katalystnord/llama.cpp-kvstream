@@ -163,9 +163,11 @@ configure with `-DLLAMA_BUILD_TESTS=ON` and build `test-backend-ops` and `test-f
 - `MMPROJ` (vision projector), `TEMPLATE` (chat template file), `SPEC` (drafting arguments) and `POOL_MIB` (decode
   pool) are optional environment variables.
 
-`integrations/systemd/llama-long.service` runs it as a user service. `integrations/pi/ctx-lever.ts` is an extension
-for the Pi coding agent: a popup (`/ctx`) that picks model, context window and V cache type, shows what stays on the
-GPU and what streams from RAM, writes the service's environment file and restarts it. It reads the attention shape
+`integrations/systemd/llama-long.service` runs it as a user service, on demand: `llama-long.socket` listens on 8090,
+the first request starts it through `llama-long-proxy.service`, and it stops after 10 idle minutes. Enable the socket,
+not the service. `integrations/pi/ctx-lever.ts` is an extension for the Pi coding agent: a popup (`/ctx`) that picks
+model, context window and V cache type, shows what stays on the GPU and what streams from RAM, and writes the
+service's environment file; the next request loads the model. It reads the attention shape
 straight from the GGUF header and refuses models the kernels cannot take, with the reason. Model profiles go in
 `~/.config/llama-long/models.json` (example: `long-models.example.json`); the provider names in it are from the
 author's setup.

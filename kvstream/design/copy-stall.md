@@ -1,4 +1,4 @@
-# The copy stall: a deadlock between the stream's copies and HIP's write-backs (2026-10-29)
+# The copy stall: a deadlock between the stream's copies and HIP's write-backs (2026-10-29, fixed 2026-11-11)
 
 ## Summary
 
@@ -115,7 +115,13 @@ Chosen 2026-11-11 (no answer from achyudh after 12 days): option 1, narrowed to 
 (`copy_to_host` in the copy engine interface), falling back to `ggml_backend_tensor_get_async` only when the host
 store is not pinned. Page loads (`assign`, host to device) stay as they are: their fallback queue is BlitHostToDev, not
 the copy engine's. Not covered, no stall seen from them: the logits read-back at the end of a prompt and the MTP rows
-read every ubatch (`llama-context.cpp`), which are also device-to-host copies with dependencies. Test: not yet run.
+read every ubatch (`llama-context.cpp`), which are also device-to-host copies with dependencies.
+
+Test 2026-11-11 (`repro-stall.sh`, ATTEMPTS=6, same settings as the 7-of-11 runs: Saluki, 256K window, pool 2420 MiB,
+copy engine on SDMA 0x2): 6 of 6 reads of the 250K probe clean, no stall messages, needle found every time, prefill
+302 to 314 t/s (the profile's 311 before the fix, so no cost; the lower runs shared the CPU with an OCR job). By
+chance alone, 6 clean reads at the old rate (7 of 11 stalled) would happen about 0.2% of the time. Kernel log clean.
+Logs: `~/ml/bench/llama-2026-11-11/copy-stall/`.
 
 Before the fix it was to be discussed with achyudh; then verify with `repro-stall.sh` (7 of 11 deep reads stalled, so a fix needs
 several clean runs to count).
