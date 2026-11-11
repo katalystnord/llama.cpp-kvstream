@@ -45,7 +45,8 @@ class InternLM2Model(TextModel):
 
         vocab_size = self.hparams.get('vocab_size', tokenizer.vocab_size())
 
-        for token_id in range(vocab_size):
+        # ids past the sentencepiece model are added tokens (e.g. InternVL's <img>), handled below
+        for token_id in range(min(vocab_size, tokenizer.vocab_size())):
             piece = tokenizer.IdToPiece(token_id)
             text = piece.encode("utf-8")
             score = tokenizer.GetScore(token_id)
@@ -77,7 +78,9 @@ class InternLM2Model(TextModel):
             with open(added_tokens_file, "r", encoding="utf-8") as f:
                 added_tokens_json = json.load(f)
 
-                for key in added_tokens_json:
+                for key in sorted(added_tokens_json, key=lambda k: added_tokens_json[k]):
+                    if added_tokens_json[key] < len(tokens):
+                        continue
                     tokens.append(key.encode("utf-8"))
                     scores.append(-1000.0)
                     toktypes.append(SentencePieceTokenTypes.USER_DEFINED)
@@ -133,6 +136,9 @@ class InternLM2Model(TextModel):
         self.gguf_writer.add_add_space_prefix(add_prefix)
 
         special_vocab = gguf.SpecialVocab(self.dir_model, n_vocab=len(tokens))
+        # without a tokenizer.json (e.g. InternVL checkpoints) SpecialVocab may not find bos/eos
+        special_vocab.special_token_ids.setdefault("bos", tokenizer.bos_id())
+        special_vocab.special_token_ids.setdefault("eos", tokenizer.eos_id())
         old_eos = special_vocab.special_token_ids["eos"]
         if chat_eos_token_id is not None:
             # For the chat model, we replace the eos with '<|im_end|>'.
