@@ -167,10 +167,13 @@ json server_chat_convert_responses_to_chatcmpl(const json & response_body) {
                 item.at("type") == "function_call"
             ) {
                 // #responses_create-input-input_item_list-item-function_tool_call
+                // a call to a namespace tool keeps the flat name the model was offered
+                const std::string ns = json_value(item, "namespace", std::string());
+                const std::string name = item.at("name");
                 json tool_call = {
                     {"function", json {
                         {"arguments", item.at("arguments")},
-                        {"name",      item.at("name")},
+                        {"name",      ns.empty() ? name : server_chat_flat_tool_name(ns, name)},
                     }},
                     {"id",   item.at("call_id")},
                     {"type", "function"},
@@ -272,6 +275,24 @@ json server_chat_convert_responses_to_chatcmpl(const json & response_body) {
             json chatcmpl_tool;
 
             const std::string type = json_value(resp_tool, "type", std::string());
+            if (type == "namespace" && resp_tool.contains("tools") && resp_tool.at("tools").is_array()) {
+                // offer each function of the namespace as a plain function named <namespace>__<name>
+                const std::string ns = json_value(resp_tool, "name", std::string());
+                for (json ns_tool : resp_tool.at("tools")) {
+                    if (json_value(ns_tool, "type", std::string()) != "function" || !ns_tool.contains("name")) {
+                        SRV_WRN("unsupported tool type '%s' in Responses namespace '%s' skipped\n",
+                                json_value(ns_tool, "type", std::string()).c_str(), ns.c_str());
+                        continue;
+                    }
+                    ns_tool.erase("type");
+                    ns_tool["name"] = server_chat_flat_tool_name(ns, ns_tool.at("name"));
+                    if (!ns_tool.contains("strict")) {
+                        ns_tool["strict"] = true;
+                    }
+                    chatcmpl_tools.push_back(json {{"type", "function"}, {"function", ns_tool}});
+                }
+                continue;
+            }
             if (type != "function") {
                 // Non-function Responses tools have no Chat Completions equivalent.
                 SRV_WRN("unsupported Responses tool type '%s' skipped\n", type.c_str());
@@ -710,4 +731,50 @@ json convert_transcriptions_to_chatcmpl(
     }
 
     return chatcmpl_body;
+}
+
+std::string server_chat_flat_tool_name(const std::string & ns, const std::string & name) {
+    return ns + "__" + name;
+}
+
+server_chat_tool_namespaces server_chat_responses_tool_namespaces(const json & body) {
+    server_chat_tool_namespaces res;
+    if (!body.contains("tools") || !body.at("tools").is_array()) {
+        return res;
+    }
+    for (const json & tool : body.at("tools")) {
+        if (json_value(tool, "type", std::string()) != "namespace" || !tool.contains("tools") || !tool.at("tools").is_array()) {
+            continue;
+        }
+        const std::string ns = json_value(tool, "name", std::string());
+        for (const json & ns_tool : tool.at("tools")) {
+            const std::string name = json_value(ns_tool, "name", std::string());
+            if (json_value(ns_tool, "type", std::string()) == "function" && !name.empty()) {
+                res[server_chat_flat_tool_name(ns, name)] = {ns, name};
+            }
+        }
+    }
+    return res;
+}
+
+void server_chat_restore_tool_namespaces(json & j, const server_chat_tool_namespaces & ns) {
+    if (ns.empty()) {
+        return;
+    }
+    if (j.is_object()) {
+        if (json_value(j, "type", std::string()) == "function_call" && j.contains("name") && j.at("name").is_string()) {
+            auto it = ns.find(j.at("name").get<std::string>());
+            if (it != ns.end()) {
+                j["namespace"] = it->second.first;
+                j["name"]      = it->second.second;
+            }
+        }
+        for (auto entry : j.items()) {
+            server_chat_restore_tool_namespaces(entry.value(), ns);
+        }
+    } else if (j.is_array()) {
+        for (auto & value : j) {
+            server_chat_restore_tool_namespaces(value, ns);
+        }
+    }
 }
