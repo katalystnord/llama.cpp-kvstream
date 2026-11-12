@@ -8,6 +8,7 @@
 #   MODEL=gguf (required)  MMPROJ=vision projector (optional)  TEMPLATE=chat template file (optional; default: the
 #   model's own)  SPEC="drafting args"
 #   POOL_MIB=GPU memory for cache pages while writing (default 2420; more for models with smaller weights)
+#   BUDGET=thinking budget in tokens (default 2000, as on the router; a request can still set its own)
 # Usage: MODEL=model.gguf kvstream/scripts/serve-long.sh [ctx] [port] [extra llama-server args...]   (defaults 204800
 # and 8090). Expects the HIP build in build-hip/ (kvstream/scripts/build-rocm.sh).
 R=$(cd "$(dirname "$0")/../.." && pwd)
@@ -20,5 +21,5 @@ export ROCR_VISIBLE_DEVICES=0 GPU_MAX_HW_QUEUES=2 DEBUG_HIP_FORCE_ASYNC_QUEUE=1 
 # shellcheck disable=SC2086  # SPEC is a list of arguments
 exec "$R/build-hip/bin/llama-server" -m "$M" "${VISION[@]}" --host 127.0.0.1 --port "$PORT" -c "$CTX" -np 1 -ngl 99 -fa on \
   -ctk q8_0 -ctv ${CTV:-q8_0} -ctkd q8_0 -ctvd ${CTV:-q8_0} --kv-stream --kv-resident-mib 450 --kv-resident-mib-decode ${POOL_MIB:-2420} \
-  --jinja "${TPL[@]}" $SPEC \
+  --jinja "${TPL[@]}" $SPEC --reasoning-budget "${BUDGET:-2000}" \
   -b 2048 -ub 512 "${@:3}"  # no --sleep-idle-seconds: the fork's base (2026-10-21) predates it
