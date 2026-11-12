@@ -7227,6 +7227,16 @@ static void test_template_output_peg_parsers(bool detailed_debug) {
             .expect(message_assist_call_thoughts)
             .run();
 
+        // The stray "assistant" channel before a reasoning block, then the tool call in the analysis channel with a
+        // "code" constraint (gpt-oss-20b in a Pi run, 2026-11-12)
+        tst.test(
+               "<|channel|>assistant<|channel|>analysis<|message|>I'm\nthinking<|end|>"
+               "<|start|>assistant<|channel|>analysis to=functions.special_function code<|message|>{\"arg1\": 1}")
+            .reasoning_format(COMMON_REASONING_FORMAT_AUTO)
+            .tools({ special_function_tool })
+            .expect(message_assist_call_thoughts)
+            .run();
+
         // Tool call in commentary channel (channel header variant)
         tst.test("<|channel|>commentary to=functions.special_function<|message|>{\"arg1\": 1}")
             .reasoning_format(COMMON_REASONING_FORMAT_AUTO)

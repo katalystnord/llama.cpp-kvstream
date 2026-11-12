@@ -73,8 +73,10 @@ common_chat_params common_chat_params_init_gpt_oss(const common_chat_template & 
         auto constrain_type  = p.chars("[A-Za-z0-9_-]", 1, -1);
         auto constraint      = p.optional(p.space() + p.optional(p.literal("<|constrain|>")) + constrain_type);
 
-        // Occasionally, gpt-oss-20b will prefix channels with this commentary
-        auto stray_commentary = p.optional(p.literal("<|channel|>commentary") + p.optional(p.literal(" to=assistant")));
+        // Occasionally, gpt-oss-20b will prefix channels with this commentary, or with "assistant" as a stray channel
+        // name (2026-11-12: "<|channel|>assistant<|channel|>analysis<|message|>..." in a Pi run)
+        auto stray_commentary = p.optional((p.literal("<|channel|>commentary") + p.optional(p.literal(" to=assistant"))) |
+                                           p.literal("<|channel|>assistant"));
         auto start_analysis = stray_commentary + p.literal("<|channel|>analysis<|message|>");
 
         if (extract_reasoning) {
