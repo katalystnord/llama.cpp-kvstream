@@ -1897,6 +1897,32 @@ static void test_convert_responses_to_chatcmpl() {
         assert_equals(false, result.at("stream").get<bool>());
     }
 
+    // Test easy input messages without "type", including the assistant's earlier answer (the short form the
+    // OpenAI spec allows; ONLYOFFICE's AI agent sends history this way, which failed with
+    // "Cannot determine type of 'item'")
+    {
+        json input = json::parse(R"({
+            "input": [
+                {"role": "user", "content": "Hi!"},
+                {"role": "assistant", "content": "Hi! How can I help you with your document today?"},
+                {"role": "user", "content": [{"type": "input_text", "text": "Summarise this page."}]}
+            ],
+            "model": "qwen38"
+        })");
+
+        json result = server_chat_convert_responses_to_chatcmpl(input);
+
+        assert_equals((size_t)3, result.at("messages").size());
+        const auto & msg1 = result.at("messages")[1];
+        assert_equals(std::string("assistant"), msg1.at("role").get<std::string>());
+        assert_equals(std::string("text"), msg1.at("content")[0].at("type").get<std::string>());
+        assert_equals(std::string("Hi! How can I help you with your document today?"),
+                      msg1.at("content")[0].at("text").get<std::string>());
+        assert_equals(false, msg1.contains("type"));
+        assert_equals(std::string("Summarise this page."),
+                      result.at("messages")[2].at("content")[0].at("text").get<std::string>());
+    }
+
     // Test string input
     {
         json input = json::parse(R"({
